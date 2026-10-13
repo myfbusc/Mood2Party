@@ -1,0 +1,78 @@
+rules_version = '2';
+
+// Mood2Party: who can read and change what in Cloud Firestore.
+// Paste this into Firebase console > Firestore Database > Rules, then Publish.
+//
+// Roles: the host (ownerId) and co-hosts (everyone else in memberIds).
+// - Host and co-hosts can read and edit the whole plan.
+// - Only the host can turn the invite link on or off, remove co-hosts, or delete the party.
+// - Someone with the current invite code can add themselves as a co-host.
+// - A co-host can remove themselves (leave).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+    function eventDoc(eventId) { return get(/databases/$(database)/documents/events/$(eventId)); }
+    function isMember(eventId) { return signedIn() && me() in eventDoc(eventId).data.memberIds; }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+    function membersChanged() { return request.resource.data.members.diff(resource.data.members).affectedKeys(); }
+
+    // Each person's own settings (what past events taught the app)
+    match /users/{uid} {
+      allow read, write: if signedIn() && me() == uid;
+    }
+
+    match /events/{eventId} {
+      // Members can read; "Your events" only asks for events you belong to
+      allow read: if signedIn() && me() in resource.data.memberIds;
+
+      // You can only create an event that you own, with yourself as the only member
+      allow create: if signedIn()
+        && request.resource.data.ownerId == me()
+        && request.resource.data.memberIds == [me()];
+
+      // 1. Host or co-host editing the plan: who has access and the invite link stay the same
+      allow update: if signedIn()
+        && me() in resource.data.memberIds
+        && !changed().hasAny(['ownerId', 'memberIds', 'members', 'inviteCode', 'joinCode']);
+
+      // 2. Host managing access: invite link on/off, removing co-hosts (never themselves, never the owner)
+      allow update: if signedIn()
+        && me() == resource.data.ownerId
+        && request.resource.data.ownerId == resource.data.ownerId
+        && me() in request.resource.data.memberIds
+        && me() in request.resource.data.members
+        && request.resource.data.memberIds.toSet().difference(resource.data.memberIds.toSet()).size() == 0
+        && (request.resource.data.get('inviteCode', null) == null || request.resource.data.inviteCode is string)
+        && !changed().hasAny(['joinCode']);
+
+      // 3. Joining with the current invite code: add only yourself, as a co-host, and change nothing else
+      allow update: if signedIn()
+        && !(me() in resource.data.memberIds)
+        && resource.data.get('inviteCode', null) is string
+        && request.resource.data.joinCode == resource.data.inviteCode
+        && changed().hasOnly(['memberIds', 'members', 'joinCode'])
+        && request.resource.data.memberIds.toSet() == resource.data.memberIds.toSet().union([me()].toSet())
+        && membersChanged().hasOnly([me()])
+        && request.resource.data.members[me()].role == 'cohost';
+
+      // 4. A co-host leaving: remove only yourself
+      allow update: if signedIn()
+        && me() in resource.data.memberIds
+        && me() != resource.data.ownerId
+        && changed().hasOnly(['memberIds', 'members'])
+        && request.resource.data.memberIds.toSet() == resource.data.memberIds.toSet().difference([me()].toSet())
+        && membersChanged().hasOnly([me()])
+        && !(me() in request.resource.data.members);
+
+      // Only the host can delete the event
+      allow delete: if signedIn() && me() == resource.data.ownerId;
+
+      // Guest groups, shopping items and tasks: the host and co-hosts can read and change them
+      match /{collection}/{recordId} {
+        allow read, write: if collection in ['guests', 'items', 'tasks'] && isMember(eventId);
+      }
+    }
+  }
+}

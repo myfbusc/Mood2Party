@@ -1,0 +1,30 @@
+{
+  "name": "mood2party",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@fontsource-variable/fredoka": "^5.3.0",
+    "firebase": "^13.0.0",
+    "lucide-react": "^1.48.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "playwright-core": "^1.63.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^6.4.3",
+    "vite-plugin-singlefile": "^2.3.3"
+  },
+  "private": true,
+  "type": "module"
+}
