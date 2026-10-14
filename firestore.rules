@@ -8,6 +8,8 @@ rules_version = '2';
 // - Only the host can turn the invite link on or off, remove co-hosts, or delete the party.
 // - Someone with the current invite code can add themselves as a co-host.
 // - A co-host can remove themselves (leave).
+// - Guests with the current RSVP link can read the party's public RSVP page and send or change their own
+//   reply, without an account. Only the host and co-hosts can read the replies.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -17,6 +19,31 @@ service cloud.firestore {
     function isMember(eventId) { return signedIn() && me() in eventDoc(eventId).data.memberIds; }
     function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
     function membersChanged() { return request.resource.data.members.diff(resource.data.members).affectedKeys(); }
+    function isMemberOf(eventId) { return signedIn() && exists(/databases/$(database)/documents/events/$(eventId)) && me() in eventDoc(eventId).data.memberIds; }
+
+    // A reply from the RSVP page: only these fields, sensible sizes, and the event's current RSVP code
+    function validReply(eventId) {
+      let d = request.resource.data;
+      let code = eventDoc(eventId).data.get('rsvpCode', null);
+      return code is string && d.code == code
+        && d.keys().hasOnly(['code', 'name', 'status', 'adults', 'kids', 'dietary', 'allergies', 'note', 'at'])
+        && d.name is string && d.name.size() > 0 && d.name.size() <= 80
+        && d.status in ['yes', 'maybe', 'no']
+        && d.adults is int && d.adults >= 0 && d.adults <= 30
+        && d.kids is int && d.kids >= 0 && d.kids <= 30
+        && d.dietary is string && d.dietary.size() <= 200
+        && d.allergies is string && d.allergies.size() <= 200
+        && d.note is string && d.note.size() <= 300
+        && d.at is int;
+    }
+
+    // The public RSVP page for one party (its id is the unguessable RSVP code)
+    match /rsvpPages/{code} {
+      allow read: if true;
+      allow create, update: if isMemberOf(request.resource.data.eventId)
+        && eventDoc(request.resource.data.eventId).data.get('rsvpCode', null) == code;
+      allow delete: if isMemberOf(resource.data.eventId);
+    }
 
     // Each person's own settings (what past events taught the app)
     match /users/{uid} {
@@ -68,6 +95,13 @@ service cloud.firestore {
 
       // Only the host can delete the event
       allow delete: if signedIn() && me() == resource.data.ownerId;
+
+      // RSVP replies: anyone with the current RSVP code can send or change a reply (no account);
+      // only the host and co-hosts can read them or clear them out
+      match /replies/{replyId} {
+        allow create, update: if validReply(eventId);
+        allow read, delete: if isMember(eventId);
+      }
 
       // Guest groups, shopping items and tasks: the host and co-hosts can read and change them
       match /{collection}/{recordId} {

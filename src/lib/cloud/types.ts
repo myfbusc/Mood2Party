@@ -24,6 +24,32 @@ export interface EventMeta {
   members: Member[];
   /** The current invite code, if the host has an invite link turned on (hosts only see it) */
   inviteCode: string | null;
+  /** The current RSVP link code, if one is turned on */
+  rsvpCode: string | null;
+}
+
+/** What a guest sees on the RSVP page (public: anyone with the link can read it). */
+export interface RsvpPage {
+  eventId: string;
+  name: string;
+  date: string;
+  startTime: string;
+  durationHrs: number;
+  venue: string;
+  deadline: string;
+  hostName: string;
+}
+
+/** One guest group's reply from the RSVP page. */
+export interface RsvpReply {
+  name: string;
+  status: 'yes' | 'maybe' | 'no';
+  adults: number;
+  kids: number;
+  dietary: string;
+  allergies: string;
+  note: string;
+  at: number;
 }
 
 /** Why joining with an invite link failed */
@@ -63,6 +89,15 @@ export interface Backend {
   joinEvent(eventId: string, code: string, user: CloudUser): Promise<void>;
   /** Host removes a co-host, or a co-host removes themselves (leaves). */
   removeMember(eventId: string, uid: string): Promise<void>;
+  /** Turn the RSVP link on with a code and its public page, or off (null). */
+  setRsvp(eventId: string, code: string | null, page: RsvpPage | null, oldCode: string | null): Promise<void>;
+  /** Keep the public page's party details up to date. */
+  updateRsvpPage(code: string, page: RsvpPage): Promise<void>;
+  /** For guests (no sign-in needed) */
+  loadRsvpPage(code: string): Promise<RsvpPage | null>;
+  submitRsvp(eventId: string, code: string, replyId: string, reply: RsvpReply): Promise<void>;
+  /** For the host and co-hosts */
+  watchReplies(eventId: string, cb: (replies: Record<string, RsvpReply>) => void, onError?: (e: unknown) => void): () => void;
   loadProfile(uid: string): Promise<{ learnings?: string } | null>;
   saveProfile(uid: string, data: { learnings: string }): Promise<void>;
 }

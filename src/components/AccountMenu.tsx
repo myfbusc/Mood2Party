@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Cloud, CloudOff, Loader2, LogIn, LogOut, TriangleAlert } from 'lucide-react';
+import { Check, Cloud, CloudOff, Loader2, LogIn, LogOut, TriangleAlert } from 'lucide-react';
 import { useStore } from '../lib/store';
 import { aiServerReady } from '../lib/ai';
 import { Button, cx } from './ui';
@@ -22,6 +22,27 @@ export function SyncLine({ className }: { className?: string }) {
     <p role="status" className={cx('flex items-center gap-1.5 text-[12.5px] font-semibold', map.cls, className)}>
       {map.icon}{map.text}
     </p>
+  );
+}
+
+/** A small tag for the account card: Saved, Saving, Offline or Not saved. */
+function SyncTag() {
+  const { cloud, s } = useStore();
+  if (!cloud.user) return null;
+  const onEvent = s.started && !s.isDemo;
+  const t = {
+    saving: { icon: <Loader2 className="size-3 animate-spin" />, text: 'Saving', full: 'Saving…', cls: 'bg-chip text-muted' },
+    saved: onEvent ? { icon: <Check className="size-3" strokeWidth={3} />, text: 'Saved', full: 'Saved to your account', cls: 'bg-ok-soft text-ok' } : null,
+    offline: { icon: <CloudOff className="size-3" />, text: 'Offline', full: "Offline · saves when you're back", cls: 'bg-gold-soft text-warn-ink' },
+    error: { icon: <TriangleAlert className="size-3" />, text: 'Not saved', full: "Couldn't save · retrying", cls: 'bg-danger-soft text-danger' },
+    off: null,
+    'signed-out': null,
+  }[cloud.status];
+  if (!t) return null;
+  return (
+    <span role="status" title={t.full} className={cx('inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-bold', t.cls)}>
+      {t.icon}{t.text}<span className="sr-only">: {t.full}</span>
+    </span>
   );
 }
 
@@ -72,21 +93,27 @@ export function AccountMenu({ compact, onPick }: { compact?: boolean; onPick?: (
 
   const u = cloud.user;
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative min-w-0">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-haspopup="true"
         aria-label={`Account: ${u.name}`}
-        className={cx('flex min-h-11 items-center gap-2.5 rounded-xl px-2 text-left hover:bg-nav-hover', compact ? '' : 'w-full')}
+        className={cx(
+          'flex min-h-11 items-center gap-2.5 text-left',
+          compact ? 'rounded-xl px-2 hover:bg-nav-hover' : 'w-full rounded-2xl border border-line bg-paper p-2.5 transition-colors hover:border-forest/40',
+        )}
       >
         <Avatar name={u.name} photo={u.photo} />
         {!compact && (
-          <span className="min-w-0">
-            <span className="block truncate text-[14px] font-semibold text-ink">{u.name}</span>
-            <SyncLine />
-          </span>
+          <>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[14px] font-semibold text-ink">{u.name}</span>
+              {u.email && <span className="block truncate text-[12px] text-muted">{u.email}</span>}
+            </span>
+            <SyncTag />
+          </>
         )}
       </button>
       {open && (

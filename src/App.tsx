@@ -11,6 +11,8 @@ import ImpactDrawer from './components/ImpactDrawer';
 import EventsDrawer from './components/EventsDrawer';
 import StoresDrawer from './components/StoresDrawer';
 import CohostsDrawer from './components/CohostsDrawer';
+import RsvpDrawer from './components/RsvpDrawer';
+import { RsvpPageView } from './components/Rsvp';
 import { AssignDrawer, SendDrawer } from './components/HelperDrawers';
 import { EventDrawer, GuestDrawer, InspireDrawer, ResetDrawer, TaskDrawer } from './components/Drawers';
 import Welcome from './pages/Welcome';
@@ -45,6 +47,7 @@ function Router() {
       {drawer?.type === 'events' && <EventsDrawer />}
       {drawer?.type === 'stores' && <StoresDrawer />}
       {drawer?.type === 'cohosts' && <CohostsDrawer />}
+      {drawer?.type === 'rsvp' && <RsvpDrawer />}
       {drawer?.type === 'assign' && <AssignDrawer key={drawer.person} person={drawer.person} />}
       {drawer?.type === 'send' && <SendDrawer key={drawer.person} person={drawer.person} />}
       {page === 'welcome' && !s.onboarding.introSeen && tour === null && <IntroModal />}
@@ -54,7 +57,18 @@ function Router() {
   );
 }
 
+// A guest opening an RSVP link sees only the reply page: no app, no account
+const rsvpCode = (() => {
+  try {
+    const c = new URLSearchParams(location.search).get('rsvp');
+    return c && /^[a-z0-9]{6,40}$/i.test(c) ? c : null;
+  } catch {
+    return null;
+  }
+})();
+
 export default function App() {
+  if (rsvpCode) return <><PageGlow besideSidebar={false} /><RsvpPageView code={rsvpCode} /></>;
   return (
     <StoreProvider>
       <Router />

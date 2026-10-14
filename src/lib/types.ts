@@ -15,6 +15,8 @@ export interface GuestGroup {
   plusOnes?: number; // extra adults the group may bring, counted as adults
   dietary?: string; // e.g. "vegetarian, halal"
   allergies?: string; // e.g. "peanuts"
+  rsvpId?: string; // the reply from the RSVP link this group came from
+  rsvpAt?: number; // when that reply was last sent
 }
 
 export type FoodFormat = 'buffet' | 'taco-bar' | 'bbq' | 'appetizers' | 'potluck';

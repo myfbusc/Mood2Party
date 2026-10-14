@@ -64,6 +64,8 @@ Rules:
 - Work out the occasion from any hint: holidays (Halloween, Friendsgiving, New Year's Eve, Diwali...), life events (birthdays with the age, graduations, showers, retirements, going-away...), and themed parties ("ugly sweater party", "murder mystery dinner"). Never answer "general party" or "Party" if the text names or hints at any occasion.
 - If someone is being celebrated, note who ("Maya's graduation", "for my son Leo" gives Leo).
 - name: suggest a short, clear event name the host would use, in Title Case, built from who it is for and the occasion, e.g. "Leo's 7th Birthday Party", "Halloween Costume Party", "Ana's Surprise 40th". Not a sentence.
+- Dates can be relative to a holiday or to today: "the day before Halloween" (Oct 30), "Christmas Eve", "the weekend before Christmas" (the Saturday before), "the Saturday after Thanksgiving", "two days before New Year's", "next Friday", "in two weeks". Always work out the exact calendar date; never say no date was given when one is described like this.
+- venue: the place in the host's own words, keeping the details, e.g. "Pool on the rooftop of my apartment", "Jake's place", "Nobu, Malibu", "Backyard of my parents' house". Rooftops, pools, parks, beaches, yards, patios and terraces are "outdoors".
 - If no date is given but the occasion has a usual date (Halloween Oct 31, New Year's Eve Dec 31, Fourth of July, Thanksgiving...), use the next one: the day itself if it is a Friday or Saturday or the party must be on the day, otherwise the Saturday before. Otherwise use ${base.draft.date}.
 - If no time is given, pick a sensible start for the occasion (brunch 11:00, kids' party 14:00, dinner 18:30, Halloween 19:00, New Year's Eve 20:00).
 - If no theme is given, suggest one that fits the occasion.
@@ -79,7 +81,7 @@ preferences (short comma-separated list of activities and wishes, e.g. "costume 
 foodText (every food mentioned, as a short comma-separated list in plain words, e.g. "taco bar, pupusas, cupcakes"; "" if none),
 drinksText (every drink mentioned, comma-separated, e.g. "water, lemonade, beer"; "" if none),
 found (array of short "Label: value" notes for what the description actually said, e.g. "Occasion: Halloween party", "For: Leo", "Guests: about 30", "Extras: costume contest"),
-assumptions (array of short plain-language sentences for each thing you had to guess or suggest, including the suggested name, date, time and theme when they were not stated).
+assumptions (array of short plain-language sentences for each thing you had to guess or suggest, including the suggested name, date, time and theme when they were not stated). Never list something as missing or guessed if the description gave it, even in other words; a relative date you worked out goes in found, e.g. "Date: Friday, October 30 (the day before Halloween)".
 
 Description:
 """${text.slice(0, 4000)}"""`,
@@ -94,7 +96,9 @@ Description:
       d.date = /^\d{4}-\d{2}-\d{2}$/.test(String(out.date)) && String(out.date) >= new Date().toISOString().slice(0, 10) ? String(out.date) : d.date;
       d.startTime = /^\d{2}:\d{2}$/.test(String(out.startTime)) ? String(out.startTime) : d.startTime;
       d.durationHrs = num(out.durationHrs, d.durationHrs) || d.durationHrs;
+      // Keep the built-in reader's place when the AI only gives a generic one
       d.venue = str(out.venue, d.venue);
+      if (/^(?:home|my place|house|tbd|unknown|n\/a)?$/i.test(d.venue.trim()) && !/^(?:home|backyard)$/i.test(base.draft.venue)) d.venue = base.draft.venue;
       d.setting = out.setting === 'outdoors' || out.setting === 'indoors' ? out.setting : d.setting;
       d.foodFormat = (Object.keys(FOOD_FORMAT_LABEL) as FoodFormat[]).includes(out.foodFormat as FoodFormat) ? (out.foodFormat as FoodFormat) : d.foodFormat;
       d.dietary = str(out.dietary, d.dietary);
@@ -113,13 +117,25 @@ Description:
       if (typeof out.foodText === 'string') d.foodText = out.foodText.trim().slice(0, 300);
       if (typeof out.drinksText === 'string') d.drinksText = out.drinksText.trim().slice(0, 300);
       { const m = parseMenu(d.foodText, d.drinksText); if (d.foodText) { d.foodFormat = m.foodFormat; d.extraFood = m.extraFood; } if (d.drinksText) { d.alcohol = m.alcohol; d.softDrinks = m.softDrinks; } }
+      // The built-in reader is exact about dates and places it finds in the text, so those win
+      const baseDate = base.found.find((f) => /^Date:/.test(f));
+      const basePlace = base.found.find((f) => /^Place:/.test(f));
+      if (baseDate) d.date = base.draft.date;
+      if (base.found.includes('Outdoors') || base.found.includes('Indoors')) d.setting = base.draft.setting;
+      if (basePlace && (!out.venue || String(out.venue).length < base.draft.venue.length / 2)) d.venue = base.draft.venue;
       setDraft(d);
-      // Only show Claude's own notes. The built-in reader's notes can contradict what Claude found (e.g. "no date").
-      const aiNotes = Array.isArray(out.assumptions) ? out.assumptions.map(String).filter(Boolean).slice(0, 8) : [];
-      const dateFromClaude = /^\d{4}-\d{2}-\d{2}$/.test(String(out.date)) && String(out.date) >= new Date().toISOString().slice(0, 10);
-      if (!dateFromClaude && !aiNotes.some((n) => /date/i.test(n))) aiNotes.push(base.assumptions.find((n) => /date/i.test(n)) ?? 'No date was found, so a placeholder date is used.');
+      // Only show the AI's own notes, minus any that call something missing that the description gave
+      let aiNotes = Array.isArray(out.assumptions) ? out.assumptions.map(String).filter(Boolean).slice(0, 8) : [];
+      if (baseDate) aiNotes = aiNotes.filter((n) => !/\b(?:no|didn'?t|not)\b.*\bdate\b|\bdate\b.*\b(?:not|wasn'?t) (?:given|mentioned|found)/i.test(n));
+      if (basePlace) aiNotes = aiNotes.filter((n) => !/\b(?:no|didn'?t|not)\b.*\b(?:location|place|venue)\b|\b(?:location|place|venue)\b.*\b(?:not|wasn'?t) (?:given|mentioned|found)/i.test(n));
+      const dateFromAi = /^\d{4}-\d{2}-\d{2}$/.test(String(out.date)) && String(out.date) >= new Date().toISOString().slice(0, 10);
+      if (!dateFromAi && !baseDate && !aiNotes.some((n) => /date/i.test(n))) aiNotes.push(base.assumptions.find((n) => /date/i.test(n)) ?? 'No date was found, so a placeholder date is used.');
       setAssumptions(aiNotes.length ? aiNotes : [`${aiName() === 'Claude' ? 'Claude' : 'The AI'} read your description. Check the details below.`]);
-      const aiFound = Array.isArray((out as { found?: unknown }).found) ? ((out as { found: unknown[] }).found).map(String).filter(Boolean).slice(0, 12) : [];
+      let aiFound = Array.isArray((out as { found?: unknown }).found) ? ((out as { found: unknown[] }).found).map(String).filter(Boolean).slice(0, 12) : [];
+      // Show the date and place that are used, in the same words as the form below
+      aiFound = aiFound.filter((f) => !(baseDate && /^Date:/i.test(f)) && !(basePlace && /^(?:Place|Location|Venue):/i.test(f)));
+      if (baseDate) aiFound.push(baseDate);
+      if (basePlace) aiFound.push(`Place: ${d.venue}`);
       setFound(aiFound);
       setStep('review');
       window.scrollTo({ top: 0 });

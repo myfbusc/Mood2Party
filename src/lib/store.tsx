@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { blankState, demoState } from './demo';
-import { addHelper, templateFrom, withBaseline } from './actions';
+import { addHelper, applyRsvpReply, templateFrom, withBaseline } from './actions';
 import { stateAttendance, stateHeadcount, type Attendance } from './attendance';
 import { computePlan, sameHeadcount, type PlanTotals } from './plan';
 import type { AppState, Category, Headcount, OnboardingAction } from './types';
@@ -26,6 +26,7 @@ export type Drawer =
   | { type: 'task'; id?: string }
   | { type: 'inspire' }
   | { type: 'cohosts' }
+  | { type: 'rsvp' }
   | { type: 'reset' }
   | { type: 'events' }
   | { type: 'stores' };
@@ -500,6 +501,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       toast({ title: `You're a co-host of ${invite.name || 'this party'}`, detail: 'You can edit everything. Changes show up for the host right away.', tone: 'success' });
     })();
   }, [invite, cloud, switchEvent, toast]);
+
+  // Replies from the RSVP link go straight into the guest list (on whichever host or co-host device is open).
+  // Re-run when the guest list changes too, so a reply is never lost to a copy arriving from the account.
+  const toasted = useRef(new Set<string>());
+  const guestsKey = s.guests.map((g) => `${g.id}:${g.rsvpAt ?? ''}`).join('|');
+  useEffect(() => {
+    const reps = cloud.replies;
+    const ids = Object.keys(reps).sort((a, b) => reps[a].at - reps[b].at);
+    if (!ids.length) return;
+    let cur = latest.current;
+    const changed: { name: string; status: string; people: number; key: string }[] = [];
+    for (const id of ids) {
+      const r = applyRsvpReply(cur, id, reps[id]);
+      if (!r.change) continue;
+      cur = r.state;
+      changed.push({ name: r.name, status: reps[id].status, people: reps[id].adults + reps[id].kids, key: `${id}@${reps[id].at}` });
+    }
+    if (!changed.length) return;
+    setS(cur);
+    const fresh = changed.filter((c) => !toasted.current.has(c.key));
+    fresh.forEach((c) => toasted.current.add(c.key));
+    if (fresh.length === 1) {
+      const c = fresh[0];
+      toast({ title: `${c.name} replied`, detail: c.status === 'yes' ? `Coming (${c.people}). Your guest list is updated.` : c.status === 'maybe' ? 'Not sure yet. Your guest list is updated.' : "Can't come. Your guest list is updated.", tone: 'info' });
+    } else if (fresh.length > 1) {
+      toast({ title: `${fresh.length} new RSVP replies`, detail: 'Your guest list is updated.', tone: 'info' });
+    }
+  }, [cloud.replies, guestsKey, toast]);
 
   // Lost access (the host removed you, or deleted the party): drop this device's copy
   useEffect(() => {

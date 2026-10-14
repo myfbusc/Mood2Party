@@ -2,7 +2,7 @@
 // lists the account's events, and handles signing in and out.
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import type { AppState } from '../types';
-import { getBackend, newInviteCode, type CloudUser, type EventMeta, type JoinError, type RemoteEvent, type SyncStatus } from './index';
+import { getBackend, newInviteCode, type CloudUser, type EventMeta, type JoinError, type RemoteEvent, type RsvpPage, type RsvpReply, type SyncStatus } from './index';
 import { diff, join, merge, split, summary } from './sync';
 
 export interface CloudApi {
@@ -30,6 +30,18 @@ export interface CloudApi {
   /** Events you had in your account this visit but no longer have access to (removed, or deleted by the host). */
   lostIds: string[];
   ackLost: (id: string) => void;
+  /** RSVP link for the open party: turn on (new code) or off. Returns the code or null. */
+  setRsvp: (on: boolean) => Promise<string | null>;
+  /** Replies from the RSVP page for the open party, by reply id */
+  replies: Record<string, RsvpReply>;
+}
+
+/** The party details a guest sees on the RSVP page. */
+export function rsvpPageFrom(s: AppState, hostName: string): RsvpPage {
+  return {
+    eventId: s.eventId ?? '', name: s.event.name, date: s.event.date, startTime: s.event.startTime,
+    durationHrs: s.event.durationHrs, venue: s.event.venue, deadline: s.event.rsvpDeadline, hostName,
+  };
 }
 
 interface Args {
@@ -244,5 +256,30 @@ export function useCloud({ s, latest, setS, localIds }: Args): CloudApi {
   }, [backend, user]);
   const ackLost = useCallback((id: string) => setLostIds((cur) => cur.filter((x) => x !== id)), []);
 
-  return { available: !!backend, ready, user, status, metas, metasLoaded, deviceOnlyIds, signIn, signOut, upload, load, remove, dismissDeviceOnly, idToken, setInvite, joinEvent, removeMember, lostIds, ackLost };
+  // RSVP link: the code lives on the event, the guest page in its own public record
+  const meta = evId ? metas.find((m) => m.id === evId) : undefined;
+  const rsvpCode = meta?.rsvpCode ?? null;
+  const hostName = meta?.members.find((m) => m.uid === meta.ownerId)?.name.split(/\s+/)[0] ?? user?.name.split(/\s+/)[0] ?? '';
+  const setRsvp = useCallback(async (on: boolean) => {
+    if (!backend || !user || !evId || !inCloud) return null;
+    const code = on ? newInviteCode() : null;
+    await backend.setRsvp(evId, code, code ? rsvpPageFrom(latest.current, hostName) : null, rsvpCode);
+    return code;
+  }, [backend, user, evId, inCloud, latest, hostName, rsvpCode]);
+  // Keep the guest page's details (name, date, place, reply-by) in step with the plan
+  const pageKey = JSON.stringify(rsvpPageFrom(s, hostName));
+  useEffect(() => {
+    if (!backend || !user || !rsvpCode || !evId) return;
+    const t = setTimeout(() => { backend.updateRsvpPage(rsvpCode, JSON.parse(pageKey)).catch(() => {}); }, 1500);
+    return () => clearTimeout(t);
+  }, [backend, user, rsvpCode, evId, pageKey]);
+  // Replies for the open party
+  const [replies, setReplies] = useState<Record<string, RsvpReply>>({});
+  useEffect(() => {
+    setReplies({});
+    if (!backend || !user || !evId || !inCloud) return;
+    return backend.watchReplies(evId, setReplies, () => {});
+  }, [backend, user, evId, inCloud]);
+
+  return { available: !!backend, ready, user, status, metas, metasLoaded, deviceOnlyIds, signIn, signOut, upload, load, remove, dismissDeviceOnly, idToken, setInvite, joinEvent, removeMember, lostIds, ackLost, setRsvp, replies };
 }

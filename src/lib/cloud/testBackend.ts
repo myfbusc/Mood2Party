@@ -1,6 +1,6 @@
 // A stand-in for Firebase used only for testing (turn on with ?testcloud=1).
 // Data lives in this browser's localStorage and is shared between tabs, so two tabs can act as two people.
-import { emptyRemote, membersFrom, type Backend, type CloudUser, type Col, type EventMeta, type RemoteEvent, type Role, type WriteOps } from './types';
+import { emptyRemote, membersFrom, type RsvpPage, type RsvpReply, type Backend, type CloudUser, type Col, type EventMeta, type RemoteEvent, type Role, type WriteOps } from './types';
 
 const KEY = 'm2p:testcloud';
 const USER_KEY = 'm2p:testcloud-user';
@@ -12,10 +12,12 @@ interface StoredEvent extends Meta {
   members: Record<string, { role: Role; name: string; email: string }>;
   updatedAt: number;
   inviteCode?: string | null;
+  rsvpCode?: string | null;
+  replies?: Record<string, RsvpReply>;
   core: string;
   cols: Record<Col, Record<string, string>>;
 }
-interface Db { events: Record<string, StoredEvent>; users: Record<string, { learnings?: string }> }
+interface Db { events: Record<string, StoredEvent>; users: Record<string, { learnings?: string }>; rsvpPages?: Record<string, RsvpPage> }
 
 const read = (): Db => {
   try {
@@ -71,7 +73,7 @@ export function createTestBackend(): Backend {
         const db = read();
         const list: EventMeta[] = Object.entries(db.events)
           .filter(([, e]) => e.memberIds.includes(uid))
-          .map(([id, e]) => ({ id, name: e.name, date: e.date, ownerId: e.ownerId, role: e.members[uid]?.role ?? 'helper', updatedAt: e.updatedAt, tasksDone: e.tasksDone, tasksTotal: e.tasksTotal, members: membersFrom(e.ownerId, e.members), inviteCode: e.ownerId === uid ? e.inviteCode ?? null : null }));
+          .map(([id, e]) => ({ id, name: e.name, date: e.date, ownerId: e.ownerId, role: e.members[uid]?.role ?? 'helper', updatedAt: e.updatedAt, tasksDone: e.tasksDone, tasksTotal: e.tasksTotal, members: membersFrom(e.ownerId, e.members), inviteCode: e.ownerId === uid ? e.inviteCode ?? null : null, rsvpCode: e.rsvpCode ?? null }));
         cb(list);
       });
     },
@@ -138,6 +140,41 @@ export function createTestBackend(): Backend {
       e.memberIds = e.memberIds.filter((x) => x !== uid);
       delete e.members[uid];
       write(db);
+    },
+    async setRsvp(eventId, code, page, oldCode) {
+      await later(null);
+      const db = read();
+      const e = db.events[eventId];
+      const u = current();
+      if (!e || !u || !e.memberIds.includes(u.uid)) throw new Error('permission-denied');
+      db.rsvpPages = db.rsvpPages ?? {};
+      if (code && page) db.rsvpPages[code] = page;
+      if (oldCode && oldCode !== code) delete db.rsvpPages[oldCode];
+      e.rsvpCode = code;
+      write(db);
+    },
+    async updateRsvpPage(code, page) {
+      const db = read();
+      db.rsvpPages = { ...(db.rsvpPages ?? {}), [code]: page };
+      write(db);
+    },
+    async loadRsvpPage(code) { return later(read().rsvpPages?.[code] ?? null); },
+    async submitRsvp(eventId, code, replyId, reply) {
+      await later(null);
+      const db = read();
+      const e = db.events[eventId];
+      // Same check as the Firestore rules
+      if (!e || !e.rsvpCode || e.rsvpCode !== code) throw Object.assign(new Error('permission-denied'), { code: 'permission-denied' });
+      e.replies = { ...(e.replies ?? {}), [replyId]: reply };
+      write(db);
+    },
+    watchReplies(eventId, cb) {
+      let last = '';
+      return watch(() => {
+        const r = read().events[eventId]?.replies ?? {};
+        const key = JSON.stringify(r);
+        if (key !== last) { last = key; cb(r); }
+      });
     },
     async loadProfile(uid) { return later(read().users[uid] ?? null); },
     async saveProfile(uid, data) {

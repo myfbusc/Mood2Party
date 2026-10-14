@@ -5,7 +5,7 @@ import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signI
 import {
   arrayRemove, arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getFirestore, onSnapshot, query, setDoc, updateDoc, where, writeBatch, type Firestore,
 } from 'firebase/firestore';
-import { COLS, emptyRemote, membersFrom, type Backend, type CloudUser, type Col, type EventMeta, type RemoteEvent } from './types';
+import { COLS, emptyRemote, membersFrom, type RsvpPage, type RsvpReply, type Backend, type CloudUser, type Col, type EventMeta, type RemoteEvent } from './types';
 
 export function firebaseConfig() {
   const env = import.meta.env;
@@ -72,7 +72,7 @@ export function createFirebaseBackend(): Backend | null {
             return {
               id: d.id, name: e.name ?? 'Event', date: e.date ?? '', ownerId: e.ownerId, role: e.members?.[uid]?.role ?? 'helper',
               updatedAt: e.updatedAt ?? 0, tasksDone: e.tasksDone ?? 0, tasksTotal: e.tasksTotal ?? 0,
-              members: membersFrom(e.ownerId, e.members), inviteCode: e.ownerId === uid ? e.inviteCode ?? null : null,
+              members: membersFrom(e.ownerId, e.members), inviteCode: e.ownerId === uid ? e.inviteCode ?? null : null, rsvpCode: e.rsvpCode ?? null,
             } satisfies EventMeta;
           }));
         },
@@ -142,6 +142,30 @@ export function createFirebaseBackend(): Backend | null {
     },
     async removeMember(eventId, uid) {
       await updateDoc(eventRef(eventId), { memberIds: arrayRemove(uid), [`members.${uid}`]: deleteField() });
+    },
+    async setRsvp(eventId, code, page, oldCode) {
+      // The code goes on the event first: the rules only accept a public page for the event's current code
+      await updateDoc(eventRef(eventId), { rsvpCode: code });
+      if (code && page) await setDoc(doc(db, 'rsvpPages', code), page);
+      if (oldCode && oldCode !== code) await deleteDoc(doc(db, 'rsvpPages', oldCode)).catch(() => {});
+    },
+    async updateRsvpPage(code, page) {
+      await setDoc(doc(db, 'rsvpPages', code), page);
+    },
+    async loadRsvpPage(code) {
+      const d = await getDoc(doc(db, 'rsvpPages', code));
+      return d.exists() ? (d.data() as RsvpPage) : null;
+    },
+    async submitRsvp(eventId, code, replyId, reply) {
+      // Allowed by the rules only while this code is the event's current RSVP code
+      await setDoc(doc(db, 'events', eventId, 'replies', replyId), { ...reply, code });
+    },
+    watchReplies(eventId, cb, onError) {
+      return onSnapshot(collection(db, 'events', eventId, 'replies'), (snap) => {
+        const out: Record<string, RsvpReply> = {};
+        snap.docs.forEach((d) => { const { code: _code, ...r } = d.data(); out[d.id] = r as RsvpReply; });
+        cb(out);
+      }, onError);
     },
     async loadProfile(uid) {
       const d = await getDoc(doc(db, 'users', uid));

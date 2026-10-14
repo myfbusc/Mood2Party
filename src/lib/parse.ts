@@ -276,6 +276,113 @@ function parseDate(text: string): DateHit | null {
   return null;
 }
 
+const NUMBER_WORDS: Record<string, number> = { a: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, couple: 2, few: 3 };
+
+/** The holiday itself (not moved to a weekend), next time it comes round. */
+function holidayDay(o: Occasion, today: Date): Date | null {
+  if (!o.when) return null;
+  const on = (y: number) => (typeof o.when === 'function' ? o.when(y) : new Date(y, o.when!.month, o.when!.day));
+  const d = on(today.getFullYear());
+  return d < today ? on(today.getFullYear() + 1) : d;
+}
+
+/**
+ * Dates said relative to a holiday: "the day before Halloween", "Christmas Eve", "the weekend before Christmas",
+ * "the Saturday after Thanksgiving", "two days before Christmas", "Halloween night", "on New Year's Day".
+ */
+function parseHolidayDate(text: string): DateHit | null {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const iso = (d: Date) => toISO(d);
+  const fit = (d: Date, said: string): DateHit => ({ date: iso(d), said, rolled: false, past: d < today });
+  for (const o of OCCASIONS) {
+    if (!o.when) continue;
+    const base = holidayDay(o, today);
+    if (!base) continue;
+    // Look at every mention: "Halloween party the day before Halloween"
+    for (const m of text.matchAll(new RegExp(o.re.source, 'gi'))) {
+    const name = m[0];
+    const at = m.index ?? 0;
+    const before = text.slice(Math.max(0, at - 60), at);
+    const after = text.slice(at + name.length, at + name.length + 20);
+    const shift = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+    // "<holiday> eve" (when the holiday's own name doesn't already mean the eve)
+    if (/^\s*eve\b/i.test(after) && !/eve/i.test(name)) return fit(shift(base, -1), `${name} Eve`);
+    // "the day/night before", "two days after", "the week before"
+    const rel = before.match(/\b(?:the\s+)?(?:(\w+)\s+)?(day|night|evening|week|weekend|sunday|monday|tuesday|wednesday|thursday|friday|saturday)s?\s+(before|after|prior to|following)\s+(?:the\s+)?$/i);
+    if (rel) {
+      const count = rel[1] ? (/^\d+$/.test(rel[1]) ? Number(rel[1]) : NUMBER_WORDS[rel[1].toLowerCase()] ?? 1) : 1;
+      const unit = rel[2].toLowerCase();
+      const dir = /before|prior/i.test(rel[3]) ? -1 : 1;
+      const said = `${rel[0].trim()} ${name}`.replace(/^the\s+/i, 'the ');
+      let d: Date;
+      if (unit === 'day' || unit === 'night' || unit === 'evening') d = shift(base, dir * count);
+      else if (unit === 'week') d = shift(base, dir * 7 * count);
+      else {
+        const target = unit === 'weekend' ? 6 : WEEKDAYS.indexOf(unit);
+        d = shift(base, dir);
+        while (d.getDay() !== target) d = shift(d, dir);
+        if (count > 1) d = shift(d, dir * 7 * (count - 1));
+      }
+      return fit(d, said);
+    }
+    // "on Halloween", "Halloween night/day", "the night of Halloween": the day itself
+    if (/\b(?:on|the (?:night|day|evening) of)\s+(?:the\s+)?$/i.test(before) || /^\s*(?:night|day|evening)\b/i.test(after)) return fit(base, name);
+    }
+  }
+  return null;
+}
+
+/** Words that start a place: "at", "in" or "on" followed by the/my/our/a or a capitalised name. */
+const TIME_WORD = /^(?:the\s+)?(?:(?:day|night|evening|morning|afternoon|weekend|week|end|middle|beginning|start)\b|(?:mon|tues|wednes|thurs|fri|satur|sun)day|jan|feb|march|april|may\b|june|july|aug|sept|oct|nov|dec|\d|noon|midnight|time|moment|mood|meantime|future|past|summer|winter|spring|fall|autumn|year|month)/i;
+const STOP_WORD = /^(?:for|with|and|from|around|about|which|that|who|where|starting|this|next|we|i|it|it's|to|so|but|because|while|until|till|or|plus|maybe|probably|budget|guests?|people|kids|friends|family|serving|having|bring|bringing)$/i;
+const HOME_WORD = /^(?:my |our )?(?:place|house|home|apartment|apt|condo|flat)$/i;
+const CITY_EXCLUDE = /^(?:January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|Halloween|Christmas|Thanksgiving|Easter)$/;
+
+/** The place in the host's own words: "the pool on the rooftop of my apartment", "Jake's place", "Nobu in Malibu". */
+function findVenue(t: string): { venue: string; city: string } {
+  const words = t.replace(/\s+/g, ' ').trim();
+  const starts = [...words.matchAll(/\b(at|in|on|inside)\s+(?=(?:the|our|my|a|an|his|her|their)\s|[A-Z][\w'’-]*)/g)];
+  for (const s of starts) {
+    const rest = words.slice((s.index ?? 0) + s[0].length);
+    if (TIME_WORD.test(rest)) continue;
+    const toks = rest.split(' ');
+    const out: string[] = [];
+    for (let i = 0; i < toks.length && out.length < 12; i++) {
+      const raw = toks[i];
+      const w = raw.replace(/[,.;:!?)]+$/, '');
+      if (!w || STOP_WORD.test(w)) break;
+      // "…my parents' house the weekend after Thanksgiving": a date phrase ends the place
+      if (out.length && /^(?:the|this|next|last)$/i.test(w) && TIME_WORD.test(toks.slice(i + 1).join(' '))) break;
+      // a time or date after "on/at/in" ends the place: "on Saturday", "at 7pm", "in two weeks"
+      if (/^(?:on|at|in|by|near|next|of|inside|behind|above|off)$/i.test(w)) {
+        const tail = toks.slice(i + 1).join(' ');
+        if (TIME_WORD.test(tail) || /^(?:two|three|four|a few|a couple)\b/i.test(tail) || !tail) break;
+      }
+      if (/^\d/.test(w) && out.length) break;
+      out.push(w);
+      if (raw !== w) break; // punctuation ends it
+    }
+    while (out.length && /^(?:on|at|in|of|by|near|the|a|an|my|our)$/i.test(out[out.length - 1])) out.pop();
+    if (!out.length) continue;
+    let phrase = out.join(' ');
+    if (s[1].toLowerCase() === 'in' && /^[A-Z]/.test(phrase) && out.length <= 3 && !/'s\b/.test(phrase)) {
+      // "in Malibu": a city, unless it's a month or holiday
+      if (!CITY_EXCLUDE.test(out[0])) return { venue: '', city: phrase };
+      continue;
+    }
+    // A trailing city: "Nobu in Malibu"
+    let city = '';
+    const inCity = phrase.match(/^(.*\S)\s+in\s+([A-Z][a-zA-Z]+(?:\s[A-Z][a-zA-Z]+){0,2})$/);
+    if (inCity && !CITY_EXCLUDE.test(inCity[2])) { phrase = inCity[1]; city = inCity[2]; }
+    phrase = phrase.replace(/^(?:the|a|an)\s+/i, '');
+    if (HOME_WORD.test(phrase)) phrase = 'Home';
+    return { venue: phrase[0].toUpperCase() + phrase.slice(1), city };
+  }
+  const city = words.match(/\bin\s+([A-Z][a-zA-Z]+(?:\s[A-Z][a-zA-Z]+){0,2})/);
+  return { venue: '', city: city && !CITY_EXCLUDE.test(city[1].split(' ')[0]) ? city[1] : '' };
+}
+
 const clock = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); return `${h % 12 || 12}${m ? `:${String(m).padStart(2, '0')}` : ''} ${h < 12 ? 'AM' : 'PM'}`; };
 
 function to24(h: number, ampm?: string) {
@@ -316,6 +423,8 @@ export function parseDescription(text: string): ParseResult {
       else if (!/party|night/i.test(m[2])) type = m[2].replace(/get[- ]together/i, 'Get-together').replace(/^\w/, (c) => c.toUpperCase());
     }
   }
+  // "Christmas Eve dinner", "New Year's Day brunch" keep their own day in the name
+  if (/\bchristmas eve\b/i.test(t) && /^christmas\b/i.test(type)) type = type.replace(/^christmas/i, 'Christmas Eve');
   if (/surprise/i.test(t) && type && !/surprise/i.test(type)) type = `Surprise ${type.replace(/^\w/, (c) => c.toLowerCase())}`;
   const kidsParty = !!occasion?.kids || (birthday && (/\b(?:son|daughter|niece|nephew|grandson|granddaughter)\b/i.test(t) || /\b\d+\s*(?:kids|children)\b/i.test(t) || (!!age && Number(age[1]) <= 12)));
   if (type) found.push(`Occasion: ${type}`);
@@ -406,21 +515,19 @@ export function parseDescription(text: string): ParseResult {
   const tNoTheme = th ? t.replace(th[0], ' ') : t;
 
   // Setting and venue
+  const place = findVenue(tNoTheme);
+  const where = `${place.venue} ${tNoTheme}`;
+  const OUTDOOR = /outdoor|outside|backyard|back yard|\byard\b|park\b|garden|patio|beach|tailgat|lawn|picnic|rooftop|roof ?deck|\broof\b|terrace|pool(?!\s*hall)|\bdeck\b|courtyard|vineyard|campground|campsite|lake|farm\b/i;
+  const INDOOR = /indoor|inside|lounge|\bhall\b|office|restaurant|clubhouse|\broom\b|church|center|garage|basement|bar\b|cafe|studio|gym|kitchen|living room/i;
   let setting: Setting = 'indoors';
-  if (/outdoor|outside|backyard|back yard|park|garden|patio|beach|tailgat|lawn|picnic/i.test(tNoTheme) && !/indoor|inside|apartment|lounge|hall\b|office/i.test(tNoTheme)) {
-    setting = 'outdoors';
-    found.push('Outdoors');
-  } else if (/indoor|inside|apartment|lounge|\bhall\b|office|restaurant|house|home|clubhouse|room|church|center|place\b/i.test(t)) {
-    found.push('Indoors');
-  } else {
-    assumptions.push('Indoor or outdoor was not mentioned, so the plan assumes indoors.');
-  }
-  let venue = '';
-  const at = t.match(/\b(?:at|in)\s+(?:the|our|my|a)\s+([a-z][\w\s'-]{2,40}?)(?=[,.;]| in | on | for | with | and | which | that |\s*$)/i);
-  const city = t.match(/\bin\s+([A-Z][a-zA-Z]+(?:\s[A-Z][a-zA-Z]+){0,2})/);
-  if (at) venue = /^(?:place|house|home|apartment|apt|condo|flat)$/i.test(at[1].trim()) ? 'Home' : at[1].trim();
-  if (city) venue = venue ? `${venue[0].toUpperCase()}${venue.slice(1)}, ${city[1]}` : city[1];
-  else if (venue) venue = venue[0].toUpperCase() + venue.slice(1);
+  // The place itself decides first ("the pool on the rooftop of my apartment" is outdoors)
+  if (place.venue && OUTDOOR.test(place.venue) && !/indoor/i.test(place.venue)) { setting = 'outdoors'; found.push('Outdoors'); }
+  else if (place.venue && INDOOR.test(place.venue)) found.push('Indoors');
+  else if (OUTDOOR.test(where) && !/indoor|inside/i.test(where)) { setting = 'outdoors'; found.push('Outdoors'); }
+  else if (INDOOR.test(where) || /apartment|house|home|place\b/i.test(where)) found.push('Indoors');
+  else assumptions.push('Indoor or outdoor was not mentioned, so the plan assumes indoors.');
+  let venue = place.venue;
+  if (place.city) venue = venue ? `${venue}, ${place.city}` : place.city;
   if (venue) found.push(`Place: ${venue}`);
   else {
     venue = setting === 'outdoors' ? 'Backyard' : 'Home';
@@ -430,13 +537,13 @@ export function parseDescription(text: string): ParseResult {
   const venueCapacity = cap ? Number(cap[1]) : Math.max(gMax + 10, Math.ceil((gMax * 1.25) / 5) * 5);
 
   // Date and time
-  const hit = parseDate(t);
+  const hit = parseDate(t) ?? parseHolidayDate(t);
   const longDate = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   let date: string;
   if (hit && !hit.past) {
     date = hit.date;
     if (hit.rolled) assumptions.push(`"${hit.said}" has already passed this year, so the date is set to ${longDate(date)}. Change it if you meant a different year.`);
-    else if (/^(this|next|coming|on)\b|weekend|tomorrow|^in\s/i.test(hit.said)) assumptions.push(`"${hit.said}" was read as ${longDate(date)}.`);
+    else if (/^(this|next|coming|on)\b|weekend|tomorrow|^in\s|before|after|eve\b|night|day$/i.test(hit.said)) assumptions.push(`"${hit.said}" was read as ${longDate(date)}.`);
   } else if (hit && hit.past) {
     date = nextSaturdayAfter(42);
     assumptions.push(`The date you gave (${hit.said}) has already passed, so a placeholder date of ${longDate(date)} is used. Enter the right date below.`);

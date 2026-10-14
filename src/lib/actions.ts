@@ -5,7 +5,7 @@ import { stateAttendance, stateHeadcount } from './attendance';
 import { computeImpact, computeLine, computePlan, computeStrategies, round2, type PlanTotals } from './plan';
 import { addDays, applyEventChange, generateTasks, uid } from './tasks';
 import type { Draft } from './parse';
-import type { AppState, EventInfo, Headcount, Learnings, Outcome, PlanItem, RetailerId } from './types';
+import type { AppState, EventInfo, GuestGroup, Headcount, Learnings, Outcome, PlanItem, RetailerId } from './types';
 
 export function planFromDraft(prev: AppState, d: Draft): AppState {
   const event: EventInfo = {
@@ -291,4 +291,46 @@ export function removeHelper(s: AppState, name: string): { state: AppState; task
 export function keepCountOnFirstGuest(prev: AppState, next: AppState): AppState {
   if (prev.guests.length > 0 || next.guests.length === 0 || prev.basis === 'custom') return next;
   return { ...next, basis: 'custom', customCount: stateHeadcount(prev).total };
+}
+
+/** A reply from the RSVP page, as it reaches the guest list. */
+export interface RsvpReplyIn {
+  name: string;
+  status: 'yes' | 'maybe' | 'no';
+  adults: number;
+  kids: number;
+  dietary: string;
+  allergies: string;
+  note: string;
+  at: number;
+}
+
+/**
+ * Puts one RSVP reply into the guest list: the group it came from before, else a group with the same name
+ * that hasn't replied through the link yet, else a new group. Older replies never overwrite newer ones.
+ */
+export function applyRsvpReply(s: AppState, replyId: string, r: RsvpReplyIn): { state: AppState; change: 'new' | 'updated' | null; name: string } {
+  const status = r.status === 'yes' ? 'confirmed' : r.status === 'maybe' ? 'maybe' : 'declined';
+  const clean = (v: string, n: number) => String(v ?? '').trim().slice(0, n);
+  const name = clean(r.name, 80) || 'Guest';
+  const fields = {
+    name, status: status as GuestGroup['status'],
+    adults: Math.max(r.status === 'no' ? 0 : 1, Math.min(30, Math.round(Number(r.adults) || 0))),
+    children: Math.max(0, Math.min(30, Math.round(Number(r.kids) || 0))),
+    dietary: clean(r.dietary, 200) || undefined, allergies: clean(r.allergies, 200) || undefined, note: clean(r.note, 300) || undefined,
+    rsvpId: replyId, rsvpAt: r.at,
+  };
+  const key = (n: string) => n.toLowerCase().replace(/^the\s+/, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  const idx = s.guests.findIndex((g) => g.rsvpId === replyId || g.id === `rsvp-${replyId}`);
+  const byName = idx < 0 ? s.guests.findIndex((g) => !g.rsvpId && key(g.name) === key(name)) : -1;
+  const at = idx >= 0 ? idx : byName;
+  if (at >= 0) {
+    const g = s.guests[at];
+    if ((g.rsvpAt ?? 0) >= r.at) return { state: s, change: null, name };
+    // Someone already on the list keeps the name the host gave them
+    const next = { ...g, ...fields, name: byName >= 0 || idx >= 0 ? g.name : name, adults: r.status === 'no' ? g.adults : fields.adults };
+    return { state: ensureKidsItems({ ...s, guests: s.guests.map((x, i) => (i === at ? next : x)) }), change: 'updated', name: next.name };
+  }
+  const group: GuestGroup = { id: `rsvp-${replyId}`, ...fields, adults: Math.max(1, fields.adults) };
+  return { state: ensureKidsItems({ ...s, guests: [...s.guests, group] }), change: 'new', name };
 }

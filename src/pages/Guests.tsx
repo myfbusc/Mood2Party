@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ChevronDown, Pencil, Play, Plus, Users, Utensils } from 'lucide-react';
+import { ChevronDown, Pencil, Play, Plus, Send, Users, Utensils } from 'lucide-react';
 import { useStore } from '../lib/store';
 import { computePlan } from '../lib/plan';
 import { dateLabel, money, plural } from '../lib/format';
@@ -88,6 +88,7 @@ export default function Guests() {
             <Play className="size-4" /> Simulate New Replies
           </Button>
         )}
+        <Button onClick={() => open({ type: 'rsvp' })}><Send className="size-4" /> Send RSVP Link</Button>
       </PageHeader>
 
       {/* 1. The one number everything is planned for */}

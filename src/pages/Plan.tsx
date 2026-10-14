@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Balloon, Building2, Camera, ChevronDown, House, Lightbulb, ListChecks, Package, Pencil, Pizza, Plus, RotateCcw, Scale, Store, Utensils } from 'lucide-react';
+import { Balloon, Building2, Camera, ChevronDown, House, ListChecks, Package, Pencil, Pizza, Plus, RotateCcw, Scale, Store, Utensils } from 'lucide-react';
 import { useStore } from '../lib/store';
 import { CATEGORIES, CATEGORY_LABEL, REFERENCE_CHECKLIST, RETAILERS, VENUE_OFTEN_PROVIDES, storeShort } from '../lib/catalog';
 import type { Line } from '../lib/plan';
@@ -7,7 +7,7 @@ import { needsPrice } from '../lib/menuText';
 import { money, plural } from '../lib/format';
 import { lowestCostSaving, markPurchased, patchItem } from '../lib/actions';
 import { getSample } from '../lib/ai';
-import { Button, Card, PageHeader, InfoTip, Note, Pill, Segmented, Stat, cx, inputBase } from '../components/ui';
+import { Button, Card, PageHeader, InfoTip, Pill, Segmented, Stat, cx, inputBase } from '../components/ui';
 import type { Category, PlanItem } from '../lib/types';
 
 const REASON = (it: PlanItem) =>
@@ -126,14 +126,6 @@ export default function Plan() {
         />
       </section>
 
-      {saving >= 5 && (
-        <Note tone={plan.remaining < 0 ? 'coral' : 'sage'} className="mt-4" icon={<Lightbulb className="size-4" />}>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <span>Switching stores could save about <b>{money(saving)}</b> on what you still need to buy{plan.remaining < 0 && plan.remaining + saving >= 0 ? ', which would bring you back within budget' : ''}.</span>
-            <Button size="sm" variant="secondary" className="shrink-0 bg-paper" onClick={() => open({ type: 'optimize' })}>Compare Stores</Button>
-          </div>
-        </Note>
-      )}
 
       <div className="mt-6 flex flex-wrap items-center gap-2 sm:gap-3">
         <label htmlFor="cat" className="sr-only">Category</label>
