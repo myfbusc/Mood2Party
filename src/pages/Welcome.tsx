@@ -1,11 +1,12 @@
-import { ArrowLeft, ArrowRight, CalendarDays, CheckCircle2, ClipboardCheck, Hand, History, MessageSquareText, Plus, RefreshCw, Sparkles } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronDown, ClipboardCheck, Copy, Hand, LogOut, MessageSquareText, MoreHorizontal, Pencil, Plus, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
 import { eventDetail, useStore, type EventDetail } from '../lib/store';
 import { demoState } from '../lib/demo';
 import { Logo } from '../components/Shell';
 import { AccountMenu } from '../components/AccountMenu';
 import { HeroArt } from '../components/HeroArt';
-import { Button, Pill, Progress, cx } from '../components/ui';
-import { dateLabel, money } from '../lib/format';
+import { Button, cx } from '../components/ui';
+import { dateLabel } from '../lib/format';
 import { daysBetween, todayISO } from '../lib/tasks';
 import { withBaseline } from '../lib/actions';
 
@@ -155,7 +156,7 @@ type Party = {
   tasksTotal: number;
   detail?: EventDetail;
   current: boolean; // the plan that is open right now
-  sample?: boolean;
+  isOwner: boolean; // false for a party you co-host: removing it means leaving
 };
 
 const whenLabel = (days: number) => (days > 1 ? `in ${days} days` : days === 1 ? 'tomorrow' : days === 0 ? 'today' : days === -1 ? 'yesterday' : `${-days} days ago`);
@@ -166,141 +167,242 @@ const timeLabel = (hhmm?: string) => {
   return `${h % 12 || 12}${m ? `:${String(m).padStart(2, '0')}` : ''} ${h < 12 ? 'AM' : 'PM'}`;
 };
 
-/** All saved parties: the next one up front, the rest as small cards. */
+const MONTH = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+const WEEKDAY_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const DELETE_DELAY = 9000; // matches how long a message with Undo stays up
+
+/** All saved parties as cards, soonest first; past ones fold away. Edit selects several to remove. */
 function YourParties() {
-  const { s, events, open, go, switchEvent, toast } = useStore();
+  const { s, events, open, go, switchEvent, deleteEvent, duplicateEvent, toast } = useStore();
   const today = todayISO();
-  const own: Party[] = events.map((e) => ({ ...e, current: e.id === s.eventId && !s.isDemo }));
-  // The open plan always shows its latest numbers
-  const withLive = own.map((p) => (p.current ? { ...p, name: s.event.name, date: s.event.date, detail: eventDetail(s), tasksDone: s.tasks.filter((t) => t.status === 'done').length, tasksTotal: s.tasks.length } : p));
-  // Only the person's own parties: the sample party is not listed here
-  const parties: Party[] = withLive;
-  if (!parties.length) return null;
+  // Removed here but waiting out the Undo
+  const [pending, setPending] = useState<Set<string>>(new Set());
+  const [editing, setEditing] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [confirmBulk, setConfirmBulk] = useState(false);
+  const [showPast, setShowPast] = useState(false);
+  const timers = useRef(new Map<string, number>());
+
+  const parties: Party[] = events
+    .filter((e) => !pending.has(e.id))
+    .map((e) => {
+      const current = e.id === s.eventId && !s.isDemo;
+      const live = current ? { name: s.event.name, date: s.event.date, detail: eventDetail(s), tasksDone: s.tasks.filter((t) => t.status === 'done').length, tasksTotal: s.tasks.length } : {};
+      return { ...e, ...live, current, isOwner: e.isOwner };
+    });
+  if (!parties.length && !pending.size) return null;
 
   const upcoming = parties.filter((p) => p.date >= today).sort((a, b) => a.date.localeCompare(b.date));
-  const past = parties.filter((p) => p.date < today);
-  const featured = upcoming[0] ?? [...parties].sort((a, b) => b.updatedAt - a.updatedAt)[0];
-  const recent = [...parties].sort((a, b) => b.updatedAt - a.updatedAt)[0];
-  const resume = recent && recent.id !== featured.id && Date.now() - recent.updatedAt < 14 * 864e5 ? recent : null;
-  const others = upcoming.filter((p) => p.id !== featured.id);
-  const pastOthers = past.filter((p) => p.id !== featured.id).sort((a, b) => b.date.localeCompare(a.date));
-  // Upcoming parties first; with none, the most recent past ones (faded)
-  const shown = others.length ? others.slice(0, 3) : pastOthers.slice(0, 3);
-  const hidden = others.length + pastOthers.length - shown.length;
+  const past = parties.filter((p) => p.date < today).sort((a, b) => b.date.localeCompare(a.date));
+  const nextId = upcoming[0]?.id;
+  const pastOpen = showPast || editing || !upcoming.length;
 
-  const openParty = async (p: Party) => {
-    if (p.current) { go('overview'); return; }
-    const ok = await switchEvent(p.id);
-    if (!ok) toast({ title: "Couldn't open that party", detail: 'Check your connection and try again.', tone: 'warn' });
+  const openParty = async (p: Party, thenEdit = false) => {
+    if (!p.current) {
+      const ok = await switchEvent(p.id);
+      if (!ok) { toast({ title: "Couldn't open that party", detail: 'Check your connection and try again.', tone: 'warn' }); return; }
+    }
+    go('overview');
+    if (thenEdit) open({ type: 'event' });
   };
+
+  /** Hide now, remove for real once the Undo has passed. */
+  const removeLater = (list: Party[]) => {
+    const ids = list.map((p) => p.id);
+    setPending((cur) => new Set([...cur, ...ids]));
+    for (const id of ids) timers.current.set(id, window.setTimeout(() => { timers.current.delete(id); deleteEvent(id); setPending((cur) => { const n = new Set(cur); n.delete(id); return n; }); }, DELETE_DELAY));
+    const left = list.filter((p) => !p.isOwner).length;
+    const deleted = list.length - left;
+    const undo = () => {
+      for (const id of ids) { window.clearTimeout(timers.current.get(id)); timers.current.delete(id); }
+      setPending((cur) => { const n = new Set(cur); ids.forEach((id) => n.delete(id)); return n; });
+      toast({ title: list.length === 1 ? `${list[0].name} is back` : `${list.length} parties are back`, tone: 'info' });
+    };
+    const title = list.length === 1 ? `${list[0].name} ${left ? 'left' : 'deleted'}` : [deleted ? `${deleted} ${deleted === 1 ? 'party' : 'parties'} deleted` : '', left ? `${left} left` : ''].filter(Boolean).join(', ');
+    toast({ title, detail: left && !deleted ? 'It stays on the host\'s account.' : undefined, tone: 'info', action: { label: 'Undo', run: undo } });
+  };
+
+  const toggle = (id: string) => setPicked((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const stopEditing = () => { setEditing(false); setPicked(new Set()); setConfirmBulk(false); };
+  const chosen = parties.filter((p) => picked.has(p.id));
+  const nLeave = chosen.filter((p) => !p.isOwner).length;
+  const nDelete = chosen.length - nLeave;
+  const bulkLabel = [nDelete ? `Delete ${nDelete}` : '', nLeave ? `Leave ${nLeave}` : ''].filter(Boolean).join(' · ');
+
+  const card = (p: Party) => (
+    <li key={p.id} className={cx(p.date < today && !editing && 'opacity-75')}>
+      <PartyCard
+        p={p}
+        today={today}
+        next={p.id === nextId}
+        editing={editing}
+        selected={picked.has(p.id)}
+        onToggle={() => toggle(p.id)}
+        onOpen={() => openParty(p)}
+        onEditDetails={() => openParty(p, true)}
+        onCopy={() => { duplicateEvent(p.id); toast({ title: `Copied ${p.name}`, detail: 'Nothing is bought, done or answered yet. Give the copy a name and date.', tone: 'success' }); }}
+        onRemove={() => removeLater([p])}
+      />
+    </li>
+  );
 
   return (
     <section aria-labelledby="parties-title" className="mx-auto max-w-[1120px] px-4 pt-2 sm:px-6">
-      <h2 id="parties-title" className="sr-only">Your Parties</h2>
-      <FeaturedParty p={featured} today={today} onOpen={() => openParty(featured)} resume={resume} onResume={() => resume && openParty(resume)} />
+      <div className="flex items-center justify-between gap-3">
+        <h2 id="parties-title" className="font-display text-[22px] font-semibold">
+          {editing ? 'Select Parties to Remove' : <>Your Parties<span className="tnum ml-1.5 text-[15px] font-semibold text-muted">{parties.length}</span></>}
+        </h2>
+        {parties.length > 0 && (editing
+          ? <Button size="sm" onClick={stopEditing}>Done</Button>
+          : <Button size="sm" variant="secondary" onClick={() => setEditing(true)}><Pencil className="size-4" /> Edit</Button>)}
+      </div>
 
-      {(shown.length > 0 || hidden > 0) && (
-        <>
-          <div className="mt-5 flex items-end justify-between gap-3">
-            <h3 className="font-display text-lg font-semibold">
-              {others.length ? 'Your Other Parties' : 'Your Past Parties'}
-              <span className="tnum ml-1.5 text-sm font-semibold text-muted">{others.length || pastOthers.length}</span>
-            </h3>
-            {(hidden > 0 || past.length > 0) && (
-              <button type="button" onClick={() => open({ type: 'events' })} className="text-sm font-semibold text-forest underline underline-offset-2">
-                See All ({parties.length})
-              </button>
-            )}
-          </div>
-          <ul className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {shown.map((p) => (
-              <li key={p.id} className={cx(p.date < today && 'opacity-70')}><MiniParty p={p} today={today} onOpen={() => openParty(p)} /></li>
-            ))}
-            {!featured.sample && (
-              <li>
-                <button type="button" onClick={() => go('setup')} className="flex h-full min-h-[76px] w-full items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-line-strong bg-paper/50 px-4 font-display text-[15px] font-semibold text-forest hover:border-forest/60 hover:bg-paper">
-                  <Plus className="size-5" aria-hidden="true" /> New Party
-                </button>
-              </li>
-            )}
-          </ul>
-        </>
+      <ul className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {upcoming.map(card)}
+        {!editing && (
+          <li>
+            <button type="button" onClick={() => go('setup')} className="flex h-full min-h-16 w-full items-center justify-center gap-2 rounded-[20px] sm:min-h-[150px] border-2 border-dashed border-line-strong bg-paper/50 px-4 font-display text-[16px] font-semibold text-forest hover:border-forest/60 hover:bg-paper">
+              <Plus className="size-5" aria-hidden="true" /> New Party
+            </button>
+          </li>
+        )}
+      </ul>
+
+      {past.length > 0 && (
+        <div className="mt-4">
+          {upcoming.length > 0 && (
+            <button type="button" onClick={() => setShowPast((v) => !v)} disabled={editing} aria-expanded={pastOpen} className="flex min-h-12 w-full items-center justify-between rounded-2xl border border-line bg-paper/70 px-4 text-left text-[15px] font-semibold hover:bg-paper">
+              <span>Past Parties<span className="tnum ml-1.5 text-muted">{past.length}</span></span>
+              {!editing && <span className="flex items-center gap-1 text-[14px] text-forest">{pastOpen ? 'Hide' : 'Show'} <ChevronDown className={cx('size-4 transition-transform', pastOpen && 'rotate-180')} /></span>}
+            </button>
+          )}
+          {pastOpen && <ul className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{past.map(card)}</ul>}
+        </div>
+      )}
+
+      {editing && (
+        <div className="sticky bottom-4 z-30 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-ink px-4 py-3 text-paper shadow-xl" role="region" aria-label="Selected parties">
+          {confirmBulk ? (
+            <>
+              <span className="text-[15px] font-semibold">
+                {nDelete ? `Delete ${nDelete === 1 ? 'this party' : `${nDelete} parties`} with their guests, shopping and tasks` : ''}{nDelete && nLeave ? ', and ' : ''}{nLeave ? `leave ${nLeave} you co-host` : ''}?
+              </span>
+              <span className="flex gap-2">
+                <button type="button" onClick={() => setConfirmBulk(false)} className="min-h-10 rounded-full bg-paper/15 px-4 text-[14px] font-semibold hover:bg-paper/25">Back</button>
+                <button type="button" onClick={() => { removeLater(chosen); stopEditing(); }} className="min-h-10 rounded-full bg-danger px-4 text-[14px] font-bold text-white hover:brightness-110">Yes, {bulkLabel}</button>
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="text-[15px] font-semibold">{chosen.length ? `${chosen.length} selected` : 'Tap parties to select them'}</span>
+              <span className="flex gap-2">
+                <button type="button" onClick={stopEditing} className="min-h-10 rounded-full bg-paper/15 px-4 text-[14px] font-semibold hover:bg-paper/25">Cancel</button>
+                <button type="button" disabled={!chosen.length} onClick={() => setConfirmBulk(true)} className="min-h-10 rounded-full bg-danger px-4 text-[14px] font-bold text-white enabled:hover:brightness-110 disabled:opacity-40">{chosen.length ? bulkLabel : 'Delete'}</button>
+              </span>
+            </>
+          )}
+        </div>
       )}
     </section>
   );
 }
 
-function FeaturedParty({ p, today, onOpen, resume, onResume }: { p: Party; today: string; onOpen: () => void; resume: Party | null; onResume: () => void }) {
-  const days = daysBetween(today, p.date);
-  const d = p.detail;
-  const alerts = d ? d.overdue + d.blocked : 0;
-  const stats = [
-    { label: 'Tasks done', value: `${p.tasksDone} of ${p.tasksTotal}`, n: p.tasksDone, max: p.tasksTotal },
-    ...(d ? [{ label: 'Items ready', value: `${d.itemsReady} of ${d.itemsTotal}`, n: d.itemsReady, max: d.itemsTotal }] : []),
-  ];
-  return (
-    <div className="rounded-3xl border border-forest/30 bg-paper p-5 sm:p-6">
-      <p className="text-sm font-semibold text-forest">{p.sample ? 'Your sample party' : days >= 0 ? 'Coming up next' : 'Your most recent party'}</p>
-      <div className="mt-2 flex flex-col gap-5 lg:flex-row lg:items-center">
-        <div className="min-w-0 flex-1">
-          <p className="flex flex-wrap items-center gap-2">
-            <Pill tone={days >= 0 && days <= 7 ? 'coral' : 'sage'}>{whenLabel(days)}</Pill>
-            {alerts > 0 && <Pill tone="red">{[d!.overdue ? `${d!.overdue} overdue` : '', d!.blocked ? `${d!.blocked} blocked` : ''].filter(Boolean).join(' · ')}</Pill>}
-          </p>
-          <h2 className="mt-2 font-display text-[26px] font-semibold leading-tight sm:text-[30px]">{p.name}</h2>
-          <p className="mt-1 text-[15px] text-muted">
-            <CalendarDays className="mr-1.5 inline size-4 align-[-2px]" aria-hidden="true" />
-            {dateLabel(p.date)}{d && timeLabel(d.startTime) ? ` · ${timeLabel(d.startTime)}` : ''}{d ? ` · ${d.guests} guests` : ''}
-          </p>
-        </div>
-        <dl className="grid grid-cols-3 gap-4 lg:w-[400px]">
-          {stats.map((x) => (
-            <div key={x.label} className="min-w-0">
-              <dt className="text-[13px] text-muted">{x.label}</dt>
-              <dd className="tnum font-bold">{x.value}</dd>
-              <div className="mt-1.5"><Progress label={x.label} value={x.n} max={x.max} /></div>
-            </div>
-          ))}
-          {d && (
-            <div className="min-w-0">
-              <dt className="text-[13px] text-muted">{d.leftToSpend >= 0 ? 'Budget left' : 'Over budget'}</dt>
-              <dd className={cx('tnum font-bold', d.leftToSpend < 0 ? 'text-danger' : 'text-ok')}>{money(Math.abs(d.leftToSpend), false)}</dd>
-            </div>
-          )}
-        </dl>
-        <Button size="lg" onClick={onOpen} className="shrink-0 lg:whitespace-nowrap">
-          {p.sample ? 'Open the Sample Party' : 'Continue Planning'} <ArrowRight className="size-5" />
-        </Button>
-      </div>
-      {resume && (
-        <button type="button" onClick={onResume} className="mt-4 flex w-full items-center gap-2 border-t border-line pt-3 text-left text-[14px] text-muted hover:text-ink">
-          <History className="size-4 shrink-0 text-forest" aria-hidden="true" />
-          <span className="min-w-0 flex-1">Pick up where you left off: <b className="text-ink">{resume.name}</b></span>
-          <ArrowRight className="size-4 shrink-0 text-forest" aria-hidden="true" />
-        </button>
-      )}
-    </div>
-  );
-}
+/** One party: a gradient top with a big date block and the name, then when, guests and how ready it is. */
+function PartyCard({ p, today, next, editing, selected, onToggle, onOpen, onEditDetails, onCopy, onRemove }: {
+  p: Party; today: string; next: boolean; editing: boolean; selected: boolean;
+  onToggle: () => void; onOpen: () => void; onEditDetails: () => void; onCopy: () => void; onRemove: () => void;
+}) {
+  const [menu, setMenu] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const onDoc = (e: MouseEvent) => { if (!wrap.current?.contains(e.target as Node)) { setMenu(false); setConfirm(false); } };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setMenu(false); setConfirm(false); } };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [menu]);
 
-function MiniParty({ p, today, onOpen }: { p: Party; today: string; onOpen: () => void }) {
   const days = daysBetween(today, p.date);
+  const dt = new Date(`${p.date}T12:00:00`);
   const d = p.detail;
   const ready = d ? d.itemsReady + p.tasksDone : p.tasksDone;
   const total = d ? d.itemsTotal + p.tasksTotal : p.tasksTotal;
   const pct = total ? Math.round((ready / total) * 100) : 0;
-  const alerts = d ? d.overdue + d.blocked : 0;
+  const isPast = p.date < today;
+  const alerts = d && !isPast ? [d.overdue ? `${d.overdue} overdue` : '', d.blocked ? `${d.blocked} blocked` : ''].filter(Boolean).join(' · ') : '';
+  const time = d ? timeLabel(d.startTime) : '';
+  const removeWord = p.isOwner ? 'Delete' : 'Leave';
+  const item = 'flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[14px] font-medium hover:bg-sage-soft';
+
   return (
-    <button type="button" onClick={onOpen} aria-label={`Open ${p.name}`} className="flex h-full min-h-[76px] w-full items-center gap-3 rounded-3xl border border-line bg-paper px-4 py-3 text-left transition-colors hover:border-forest/50">
-      <span className="grid size-12 shrink-0 place-items-center rounded-full" style={{ background: `conic-gradient(var(--color-forest) ${pct}%, var(--color-chip) 0)` }} title={`${pct}% ready`}>
-        <span className="tnum grid size-[38px] place-items-center rounded-full bg-paper text-[11px] font-bold">{pct}%</span>
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate font-display text-[16px] font-semibold">{p.name}</span>
-        <span className="block truncate text-[13px] text-muted">{dateLabel(p.date)} · {whenLabel(days)}</span>
-        {alerts > 0 && <span className="mt-1 inline-block rounded-full bg-danger-soft px-2 py-0.5 text-[11px] font-bold text-danger">{[d!.overdue ? `${d!.overdue} overdue` : '', d!.blocked ? `${d!.blocked} blocked` : ''].filter(Boolean).join(' · ')}</span>}
-      </span>
-    </button>
+    <div ref={wrap} className={cx('relative h-full rounded-[20px] border bg-paper shadow-[0_6px_18px_rgb(48_80_216/0.10)] transition-shadow', selected ? 'border-forest ring-[3px] ring-forest' : 'border-line')}>
+      <button
+        type="button"
+        onClick={editing ? onToggle : onOpen}
+        aria-label={editing ? `${selected ? 'Unselect' : 'Select'} ${p.name}` : `Open ${p.name}`}
+        aria-pressed={editing ? selected : undefined}
+        className="block h-full w-full rounded-[20px] text-left"
+      >
+        <span className={cx('m2p-grad flex items-center gap-3 rounded-t-[19px] px-3.5 py-3 pr-12', isPast && 'grayscale-[0.45]')}>
+          <span className={cx('grid w-[54px] shrink-0 place-items-center rounded-xl py-1.5 text-center leading-none', next ? 'bg-paper text-forest' : 'bg-white/20 text-white')} role="img" aria-label={dateLabel(p.date)}>
+            <span aria-hidden="true" className="text-[11px] font-bold tracking-[0.08em]">{MONTH[dt.getMonth()]}</span>
+            <span aria-hidden="true" className="tnum mt-0.5 font-display text-[24px] font-bold">{dt.getDate()}</span>
+          </span>
+          <span className="min-w-0">
+            {next && <span className="block text-[10.5px] font-bold tracking-[0.1em] opacity-90">UP NEXT</span>}
+            <span className="line-clamp-2 font-display text-[16.5px] font-semibold leading-tight">{p.name}</span>
+          </span>
+        </span>
+        <span className="block px-3.5 pb-3.5 pt-3">
+          <span className="block text-[14px] font-semibold text-ink">{WEEKDAY_LONG[dt.getDay()]}{dt.getFullYear() !== new Date().getFullYear() ? `, ${dt.getFullYear()}` : ''}{time ? ` · ${time}` : ''}</span>
+          <span className="mt-0.5 block text-[13px] text-muted">{whenLabel(days)}{d ? ` · ${d.guests} guests` : ''}{!p.isOwner ? ' · co-host' : ''}</span>
+          <span className="mt-3 block h-1.5 overflow-hidden rounded-full bg-chip" role="progressbar" aria-label={`${p.name} ready`} aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+            <span className="block h-full rounded-full" style={{ width: `${pct}%`, background: 'var(--m2p-grad-solid)' }} />
+          </span>
+          <span className="mt-1.5 flex items-center justify-between gap-2 text-[12px]">
+            <span className={cx('truncate', alerts ? 'font-semibold text-danger' : 'text-muted')}>{alerts}</span>
+            <span className="shrink-0 font-semibold text-ok">{isPast && pct >= 100 ? 'Done' : `${pct}% ready`}</span>
+          </span>
+        </span>
+      </button>
+
+      {/* Top right: a checkbox while selecting, otherwise the ⋯ menu */}
+      {editing ? (
+        <span aria-hidden="true" className={cx('pointer-events-none absolute right-3 top-3 grid size-7 place-items-center rounded-lg border-2', selected ? 'border-paper bg-paper text-forest' : 'border-white/90 bg-white/20')}>
+          {selected && <Check className="size-4" strokeWidth={3} />}
+        </span>
+      ) : (
+        <button type="button" onClick={() => { setMenu((m) => !m); setConfirm(false); }} aria-label={`More for ${p.name}`} aria-haspopup="menu" aria-expanded={menu} className={cx('absolute right-2.5 top-2.5 grid size-9 place-items-center rounded-xl transition-colors', menu ? 'bg-paper text-forest' : 'bg-white/20 text-white hover:bg-white/30')}>
+          <MoreHorizontal className="size-5" aria-hidden="true" />
+        </button>
+      )}
+
+      {menu && !editing && (
+        <div role="menu" aria-label={p.name} className="absolute right-2 top-12 z-40 w-60 max-w-[calc(100vw-2rem)] rounded-2xl border border-line bg-paper p-1.5 text-ink shadow-xl">
+          {confirm ? (
+            <div className="p-2">
+              <p className="text-[14px]">{p.isOwner ? <>Delete <b>{p.name}</b> with its guests, shopping and tasks?</> : <>Leave <b>{p.name}</b>? It stays on the host's account; you just won't see it.</>}</p>
+              <div className="mt-3 flex gap-2">
+                <Button size="sm" variant="danger" onClick={() => { setMenu(false); setConfirm(false); onRemove(); }}>{removeWord}</Button>
+                <Button size="sm" variant="ghost" onClick={() => setConfirm(false)}>Keep It</Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <button type="button" role="menuitem" className={item} onClick={() => { setMenu(false); onOpen(); }}><ArrowRight className="size-4 text-forest" aria-hidden="true" /> Open</button>
+              <button type="button" role="menuitem" className={item} onClick={() => { setMenu(false); onEditDetails(); }}><Pencil className="size-4 text-forest" aria-hidden="true" /> Edit Details</button>
+              <button type="button" role="menuitem" className={item} onClick={() => { setMenu(false); onCopy(); }}><Copy className="size-4 text-forest" aria-hidden="true" /> Copy as New Event</button>
+              <div className="my-1 border-t border-line" />
+              <button type="button" role="menuitem" className={cx(item, 'text-danger hover:bg-danger-soft')} onClick={() => setConfirm(true)}>
+                {p.isOwner ? <Trash2 className="size-4" aria-hidden="true" /> : <LogOut className="size-4" aria-hidden="true" />} {removeWord} Party…
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

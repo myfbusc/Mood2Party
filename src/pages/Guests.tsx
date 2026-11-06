@@ -251,8 +251,8 @@ function PlanFor({ head, markDid }: { head: Headcount; markDid: (a: 'basis') => 
   const pad = Math.max(2, Math.round((range.max - range.min) * 0.25));
   const bounds = drag ?? { lo: Math.max(0, Math.min(range.min, head.total) - pad), hi: Math.max(range.max, head.total) + pad };
   const shown = drag?.n ?? head.total;
-  // Positions line up with the slider's thumb (20px wide), not the raw track
-  const at = (n: number) => { const f = Math.min(1, Math.max(0, (n - bounds.lo) / Math.max(1, bounds.hi - bounds.lo))); return `calc(${f * 100}% + ${10 - f * 20}px)`; };
+  // Positions line up with the slider's thumb (24px wide), not the raw track
+  const at = (n: number) => { const f = Math.min(1, Math.max(0, (n - bounds.lo) / Math.max(1, bounds.hi - bounds.lo))); return `calc(${f * 100}% + ${12 - f * 24}px)`; };
   const commitDrag = (n: number) => {
     setDrag(null);
     if (n === head.total) return;
@@ -311,8 +311,10 @@ function PlanFor({ head, markDid }: { head: Headcount; markDid: (a: 'basis') => 
       {range.max > range.min && (
         <div className="mt-4 pl-0 sm:pl-14">
           <div className="relative flex h-7 items-center">
-            <div className="absolute inset-x-0 h-2 rounded-full bg-chip" aria-hidden="true" />
-            <div className="absolute h-2 rounded-full bg-sage/70" style={{ left: at(range.min), right: `calc(100% - ${at(range.max)})` }} aria-hidden="true" />
+            {/* White notches on the track for Minimum, Expected and Maximum (hidden under the thumb) */}
+            {ticks.map((t) => (
+              <span key={t.b} aria-hidden="true" className={cx('pointer-events-none absolute z-10 h-3.5 w-[3px] -translate-x-1/2 rounded-full bg-paper shadow-[0_0_0_1px_rgb(0_0_0/0.08)]', t.n === shown && 'invisible')} style={{ left: at(t.n) }} />
+            ))}
             <input
               type="range"
               aria-label="Plan for how many people"
@@ -325,18 +327,18 @@ function PlanFor({ head, markDid }: { head: Headcount; markDid: (a: 'basis') => 
               onPointerUp={(e) => commitDrag(Number((e.target as HTMLInputElement).value))}
               onKeyUp={(e) => commitDrag(Number((e.target as HTMLInputElement).value))}
               onBlur={() => { if (drag) commitDrag(drag.n); }}
-              className="m2p-range-plain relative w-full cursor-pointer touch-pan-y"
+              className="m2p-range relative h-2 w-full cursor-pointer touch-pan-y"
             />
           </div>
           <div className="relative mt-1 h-4 text-[12px]" aria-hidden="true">
-            {ticks.map((t, i) => (
+            {ticks.map((t) => (
               <button
                 type="button"
                 tabIndex={-1}
                 key={t.b}
                 onClick={() => choose(t.b)}
-                className={cx('tnum absolute whitespace-nowrap hover:text-ink', i === 1 && '-translate-x-1/2', s.basis === t.b ? 'font-bold text-forest' : 'text-muted')}
-                style={i === 0 ? { left: `max(0px, calc(${at(t.n)} - 10px))` } : i === 2 ? { right: `max(0px, calc(100% - ${at(t.n)} - 10px))` } : { left: at(t.n) }}
+                className={cx('tnum absolute -translate-x-1/2 whitespace-nowrap hover:text-ink', s.basis === t.b ? 'font-bold text-forest' : 'text-muted')}
+                style={{ left: at(t.n) }}
               >
                 {t.label} {t.n}
               </button>
