@@ -4,7 +4,7 @@ import { useStore } from '../lib/store';
 import { CATEGORIES, CATEGORY_LABEL, REFERENCE_CHECKLIST, RETAILERS, VENUE_OFTEN_PROVIDES, storeShort } from '../lib/catalog';
 import type { Line } from '../lib/plan';
 import { needsPrice } from '../lib/menuText';
-import { money, plural } from '../lib/format';
+import { money, plural, qtyUnit } from '../lib/format';
 import { lowestCostSaving, markPurchased, patchItem } from '../lib/actions';
 import { getSample } from '../lib/ai';
 import { Button, Card, PageHeader, InfoTip, Pill, Segmented, Stat, cx, inputBase } from '../components/ui';
@@ -196,16 +196,17 @@ export default function Plan() {
                   const first = l.item.id === firstId;
                   return (
                     <li key={l.item.id} data-tour={first ? 'first-item' : undefined} className="grid grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-3 py-3 sm:flex sm:px-4">
-                      <div className="grid size-7 place-items-center">
+                      {/* A label with an invisible larger edge: the box looks the same but is easier to tap */}
+                      <label className="relative grid shrink-0 cursor-pointer place-items-center before:absolute before:-inset-2.5 before:content-[''] size-7">
                         {owned ? (
                           <span className="grid size-6 place-items-center rounded-md bg-cat-supplies-soft text-cat-supplies" title="Already have"><House className="size-3.5" aria-hidden="true" /><span className="sr-only">Already have</span></span>
                         ) : (
                           <input type="checkbox" className="size-6 cursor-pointer accent-forest" checked={bought} onChange={() => togglePurchased(l)} aria-label={`Mark ${l.item.name} as bought`} />
                         )}
-                      </div>
+                      </label>
                       <div className="min-w-0 sm:flex-1">
                         <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <button type="button" onClick={() => open({ type: 'item', id: l.item.id })} className={cx('text-left font-semibold hover:underline', bought && 'text-muted')}>{l.item.name}</button>
+                          <button type="button" onClick={() => open({ type: 'item', id: l.item.id })} className={cx('-my-1.5 py-1.5 text-left font-semibold hover:underline', bought && 'text-muted')}>{l.item.name}</button>
                           {bought && <Pill tone="green">Bought</Pill>}
                           {l.status === 'buy-more' && <Pill tone="coral">Buy {plural(l.morePkgs, 'more pack', 'more packs')}</Pill>}
                           {owned && <Pill className="bg-cat-supplies-soft text-cat-supplies">Already have</Pill>}
@@ -214,7 +215,7 @@ export default function Plan() {
                           {l.item.tag === 'vendor' && <Pill tone="sage">Vendor</Pill>}
                         </p>
                         <p className="tnum mt-0.5 truncate text-[13px] text-muted">
-                          {l.need} {l.item.unit}{!owned && l.pkgs > 0 && <> · {storeShort(l.opt)}</>}{l.item.purchasedPkgs > 0 && typeof l.item.paidAmount === 'number' && <> · paid {money(l.item.paidAmount)}</>}
+                          {qtyUnit(l.need, l.item.unit)}{!owned && l.pkgs > 0 && <> · {storeShort(l.opt)}</>}{l.item.purchasedPkgs > 0 && typeof l.item.paidAmount === 'number' && <> · paid {money(l.item.paidAmount)}</>}
                         </p>
                       </div>
                       <div className="col-span-3 col-start-2 row-start-2 flex items-center justify-between gap-3 sm:contents">

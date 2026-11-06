@@ -342,31 +342,34 @@ function PartyCard({ p, today, next, editing, selected, onToggle, onOpen, onEdit
 
   return (
     <div ref={wrap} className={cx(
-      'group relative h-full rounded-[20px] border bg-paper shadow-[0_6px_18px_rgb(48_80_216/0.10)] transition duration-200 ease-out',
-      // Hover or keyboard focus: the card lifts a little, its shadow deepens and the outline picks up the brand color
+      // No border around the colored top (a light border there shows as a pale rim); only the white part has one
+      'group relative h-full rounded-[20px] shadow-[0_6px_18px_rgb(48_80_216/0.10)] transition duration-200 ease-out',
+      // Hover or keyboard focus: the card lifts a little, its shadow deepens and a brand-colored outline appears
       'hover:-translate-y-1 hover:shadow-[0_14px_32px_rgb(48_80_216/0.22)] focus-within:-translate-y-1 focus-within:shadow-[0_14px_32px_rgb(48_80_216/0.22)] motion-reduce:transform-none',
-      selected ? 'border-forest ring-[3px] ring-forest' : 'border-line hover:border-forest/70 hover:ring-4 hover:ring-forest/15 focus-within:border-forest/70 focus-within:ring-4 focus-within:ring-forest/15',
-      menu && '-translate-y-1 border-forest/70 ring-4 ring-forest/15 shadow-[0_14px_32px_rgb(48_80_216/0.22)]',
+      selected ? 'ring-[3px] ring-forest' : 'hover:ring-2 hover:ring-forest/60 focus-within:ring-2 focus-within:ring-forest/60',
+      menu && '-translate-y-1 ring-2 ring-forest/60 shadow-[0_14px_32px_rgb(48_80_216/0.22)]',
     )}>
       <button
         type="button"
         onClick={editing ? onToggle : onOpen}
         aria-label={editing ? `${selected ? 'Unselect' : 'Select'} ${p.name}` : `Open ${p.name}`}
         aria-pressed={editing ? selected : undefined}
-        className="block h-full w-full rounded-[20px] text-left"
+        className="flex h-full w-full flex-col rounded-[20px] text-left"
       >
-        <span className={cx('m2p-grad flex items-center gap-3 rounded-t-[19px] px-3.5 py-3 pr-12 transition-[filter] duration-200 group-hover:brightness-110', isPast && 'grayscale-[0.45]')}>
+        <span className={cx('m2p-grad flex min-h-[88px] items-center gap-3 rounded-t-[20px] px-3.5 py-3 pr-12 transition-[filter] duration-200 group-hover:brightness-110', isPast && 'grayscale-[0.45]')}>
           <span className={cx('grid w-[54px] shrink-0 place-items-center rounded-xl py-1.5 text-center leading-none', next ? 'bg-paper text-forest' : 'bg-white/20 text-white')} role="img" aria-label={dateLabel(p.date)}>
             <span aria-hidden="true" className="text-[11px] font-bold tracking-[0.08em]">{MONTH[dt.getMonth()]}</span>
             <span aria-hidden="true" className="tnum mt-0.5 font-display text-[24px] font-bold">{dt.getDate()}</span>
           </span>
           <span className="min-w-0">
-            {next && <span className="block text-[10.5px] font-bold tracking-[0.1em] opacity-90">UP NEXT</span>}
-            <span className="line-clamp-2 font-display text-[16.5px] font-semibold leading-tight">{p.name}</span>
+            <span className="line-clamp-3 font-display text-[16px] font-semibold leading-[1.2]" title={p.name}>{p.name}</span>
           </span>
         </span>
-        <span className="block px-3.5 pb-3.5 pt-3">
+        <span className="block flex-1 rounded-b-[20px] border border-t-0 border-line bg-paper px-3.5 pb-3.5 pt-3">
+          <span className="flex items-start justify-between gap-2">
           <span className="block text-[14px] font-semibold text-ink">{WEEKDAY_LONG[dt.getDay()]}{dt.getFullYear() !== new Date().getFullYear() ? `, ${dt.getFullYear()}` : ''}{time ? ` · ${time}` : ''}</span>
+          {next && <span className="shrink-0 rounded-full bg-sage-soft px-2 py-0.5 text-[10.5px] font-bold tracking-[0.08em] text-forest">UP NEXT</span>}
+          </span>
           <span className="mt-0.5 block text-[13px] text-muted">{whenLabel(days)}{d ? ` · ${d.guests} guests` : ''}{!p.isOwner ? ' · co-host' : ''}</span>
           <span className="mt-3 block h-1.5 overflow-hidden rounded-full bg-chip" role="progressbar" aria-label={`${p.name} ready`} aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
             <span className="block h-full rounded-full" style={{ width: `${pct}%`, background: 'var(--m2p-grad-solid)' }} />

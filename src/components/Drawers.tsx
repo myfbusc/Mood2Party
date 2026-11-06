@@ -4,7 +4,7 @@ import { useStore } from '../lib/store';
 import { CATEGORIES, CATEGORY_LABEL, RETAILERS, RETAILER_IDS } from '../lib/catalog';
 import { ensureKidsItems, keepCountOnFirstGuest, removeHelper, saveEventDetails } from '../lib/actions';
 import { blankState } from '../lib/demo';
-import { money, plural } from '../lib/format';
+import { money, plural, qtyUnit } from '../lib/format';
 import { todayISO, uid } from '../lib/tasks';
 import { aiErrorCopy, aiName, getSample } from '../lib/ai';
 import { STATUS_LABEL, STATUS_OPTIONS, shownStatus } from '../pages/Guests';
@@ -313,7 +313,7 @@ Reply with only a JSON array of objects: {"name": string, "category": "decoratio
                 <input type="checkbox" className="mt-1 size-5 accent-forest" checked={x.on} onChange={() => setItems((all) => all.map((y, j) => (j === i ? { ...y, on: !y.on } : y)))} />
                 <span className="min-w-0 flex-1">
                   <span className="block font-semibold">{x.name}</span>
-                  <span className="tnum block text-[13px] text-muted">{x.qty} {x.unit} · {Math.ceil(x.qty / x.packQty)} × {money(x.packPrice)} at {RETAILERS[x.retailer].short} · {CATEGORY_LABEL[x.category]}</span>
+                  <span className="tnum block text-[13px] text-muted">{qtyUnit(x.qty, x.unit)} · {Math.ceil(x.qty / x.packQty)} × {money(x.packPrice)} at {RETAILERS[x.retailer].short} · {CATEGORY_LABEL[x.category]}</span>
                   {x.why && <span className="block text-[13px]">{x.why}</span>}
                 </span>
               </label>

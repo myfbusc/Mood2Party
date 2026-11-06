@@ -2,7 +2,7 @@ import { CheckCircle2, MessageCircle, RefreshCcw, ThumbsDown, ThumbsUp } from 'l
 import { useStore } from '../lib/store';
 import { learningsFromWrapUp, weightsFromLearnings } from '../lib/actions';
 import { blankState } from '../lib/demo';
-import { plural } from '../lib/format';
+import { plural, qtyUnit } from '../lib/format';
 import { Button, Card, Field, InfoTip, Note, PageHeader, SectionHead, cx, inputBase, inputCls } from '../components/ui';
 import type { Outcome, WrapUp as W } from '../lib/types';
 
@@ -64,7 +64,7 @@ export default function WrapUp() {
                   <li key={l.item.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center">
                     <div className="min-w-0 flex-1">
                       <p className="font-semibold">{l.item.name}</p>
-                      <p className="tnum text-[13px] text-muted">Planned {l.need} {l.item.unit}</p>
+                      <p className="tnum text-[13px] text-muted">Planned {qtyUnit(l.need, l.item.unit)}</p>
                     </div>
                     <div role="radiogroup" aria-label={`How did ${l.item.name} work out?`} className="flex gap-1">
                       {OUTCOMES.map((o) => {

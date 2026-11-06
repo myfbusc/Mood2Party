@@ -33,3 +33,15 @@ export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n ==
 export function packLine(pkgs: number, packLabel: string) {
   return `${pkgs} × ${packLabel}`;
 }
+
+/** "1 kit", "2 kits", "1 canopy": an amount with its unit, singular for one. */
+export function qtyUnit(n: number, unit: string): string {
+  const u = unit.trim();
+  if (n !== 1 || !u) return `${n} ${u}`.trim();
+  const one = /^lbs$/i.test(u) ? 'lb'
+    : /ies$/i.test(u) ? u.replace(/ies$/i, 'y')
+    : /(ch|sh|x|ss)es$/i.test(u) ? u.replace(/es$/i, '')
+    : /[^s]s$/i.test(u) ? u.replace(/s$/i, '')
+    : u;
+  return `1 ${one}`;
+}

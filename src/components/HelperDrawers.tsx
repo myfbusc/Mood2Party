@@ -3,7 +3,7 @@ import { Check, Copy, Mail, MessageSquare } from 'lucide-react';
 import { useStore } from '../lib/store';
 import { storeShort } from '../lib/catalog';
 import { copyText } from '../lib/links';
-import { dateLabel, money, plural } from '../lib/format';
+import { dateLabel, money, plural, qtyUnit } from '../lib/format';
 import { Button, Drawer, Note, cx } from './ui';
 
 const who = (p: string) => (p === 'You' ? 'you' : p);
@@ -86,7 +86,7 @@ export function AssignDrawer({ person }: { person: string }) {
                 <input type="checkbox" className="size-5 accent-forest" checked={buySel.has(l.item.id)} onChange={() => toggle(buySel, l.item.id, setBuySel)} />
                 <span className="min-w-0 flex-1">
                   <span className="font-semibold">{l.item.name}</span>
-                  <span className="tnum block text-[13px] text-muted">{l.need} {l.item.unit} · {storeShort(l.opt)} · about {money(l.cost)}{l.item.buyer && l.item.buyer !== person ? ` · now ${l.item.buyer === 'You' ? 'you' : l.item.buyer}` : ''}</span>
+                  <span className="tnum block text-[13px] text-muted">{qtyUnit(l.need, l.item.unit)} · {storeShort(l.opt)} · about {money(l.cost)}{l.item.buyer && l.item.buyer !== person ? ` · now ${l.item.buyer === 'You' ? 'you' : l.item.buyer}` : ''}</span>
                 </span>
               </label>
             </li>

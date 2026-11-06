@@ -119,10 +119,12 @@ export default function Tasks() {
                   const extra = (att && (t.blocker || t.affectedBy)) || (needsResource(t) ? `Needs: ${t.needs}` : '');
                   return (
                     <li key={t.id} className="group grid grid-cols-[20px_minmax(0,1fr)_36px] items-center gap-x-3 gap-y-2 px-3 py-2.5 transition-colors hover:bg-cream sm:flex sm:px-4">
-                      <input type="checkbox" className="size-5 shrink-0 cursor-pointer accent-forest" checked={t.status === 'done'} onChange={() => toggleDone(t)} aria-label={`Mark ${t.title} as ${t.status === 'done' ? 'not done' : 'done'}`} />
+                      <label className="relative grid shrink-0 cursor-pointer place-items-center before:absolute before:-inset-2.5 before:content-[''] size-5">
+                        <input type="checkbox" className="size-5 cursor-pointer accent-forest" checked={t.status === 'done'} onChange={() => toggleDone(t)} aria-label={`Mark ${t.title} as ${t.status === 'done' ? 'not done' : 'done'}`} />
+                      </label>
                       <div className="min-w-0 flex-1">
                         <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <button type="button" onClick={() => open({ type: 'task', id: t.id })} className={cx('min-w-0 text-left font-semibold hover:underline', t.status === 'done' && 'text-muted line-through decoration-1')}>
+                          <button type="button" onClick={() => open({ type: 'task', id: t.id })} className={cx('-my-1.5 min-w-0 py-1.5 text-left font-semibold hover:underline', t.status === 'done' && 'text-muted line-through decoration-1')}>
                             {t.title}
                           </button>
                           {t.priority === 'high' && t.status !== 'done' && <Pill tone="coral">High</Pill>}

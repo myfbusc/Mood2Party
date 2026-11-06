@@ -36,7 +36,7 @@ export function HelperChips({ id, names, onChange, label = 'Organizers', hint, i
     setInfo(reworded ? `Added ${added.join(', ')}.${skippedSelf ? ' You are already included as the host.' : ''}` : '');
   };
   return (
-    <div className="grid gap-1.5">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1.5">
       <span className="flex h-5 items-center gap-1"><label htmlFor={id} className="text-sm font-semibold text-ink">{label}</label>{infoTip && <InfoTip label={`About ${label.toLowerCase()}`}>{infoTip}</InfoTip>}</span>
       {names.length > 0 && (
         <ul className="flex flex-wrap gap-2" aria-label="Organizers added">
@@ -50,7 +50,7 @@ export function HelperChips({ id, names, onChange, label = 'Organizers', hint, i
           ))}
         </ul>
       )}
-      <div className="flex gap-2">
+      <div className="flex min-w-0 gap-2">
         <input
           id={id}
           className={cx(inputBase, 'min-w-0 flex-1', error && 'border-danger')}

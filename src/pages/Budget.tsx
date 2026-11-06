@@ -263,11 +263,13 @@ export default function Budget() {
           <ul className="divide-y divide-line">
             {s.expenses.map((e) => (
               <li key={e.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                <input
-                  type="checkbox" className="size-5 accent-forest" checked={e.paid}
-                  aria-label={`Mark ${e.name} as paid`}
-                  onChange={() => update((p) => ({ ...p, expenses: p.expenses.map((x) => (x.id === e.id ? { ...x, paid: !x.paid } : x)) }))}
-                />
+                <label className="relative grid shrink-0 cursor-pointer place-items-center before:absolute before:-inset-2.5 before:content-[''] size-5">
+                  <input
+                    type="checkbox" className="size-5 cursor-pointer accent-forest" checked={e.paid}
+                    aria-label={`Mark ${e.name} as paid`}
+                    onChange={() => update((p) => ({ ...p, expenses: p.expenses.map((x) => (x.id === e.id ? { ...x, paid: !x.paid } : x)) }))}
+                  />
+                </label>
                 <span className={cx('min-w-0 flex-1 font-semibold max-sm:basis-[calc(100%-2.75rem)]', e.paid && 'text-muted')}>
                   {e.name}{e.paid && <span className="ml-2 text-[13px] font-medium text-ok">Paid</span>}
                   {e.kind === 'minimum' && (

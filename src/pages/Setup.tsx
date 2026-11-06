@@ -367,18 +367,18 @@ export function DraftForm({ draft, onChange }: { draft: Draft; onChange: (d: Dra
   const [kidsOpen, setKidsOpen] = useState(false);
   const num = (v: string) => (v === '' ? 0 : Math.max(0, Number(v)));
   return (
-    <div className="grid gap-4">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
       <Field label="Event name" htmlFor="d-name" info="Give your party a name, like “Maya’s Graduation Party.” Mood2Party uses it to understand the kind of party and its style.">
         <input id="d-name" className={inputCls} value={draft.name} onChange={(e) => set('name', e.target.value)} placeholder="Maya's Graduation Party" />
       </Field>
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 [&>*]:min-w-0">
         <Field label="Date" htmlFor="d-date" className="col-span-2"><input id="d-date" type="date" className={inputCls} value={draft.date} onChange={(e) => set('date', e.target.value)} /></Field>
         <Field label="Start time" htmlFor="d-time"><input id="d-time" type="time" className={inputCls} value={draft.startTime} onChange={(e) => set('startTime', e.target.value)} /></Field>
         <Field label="Hours" htmlFor="d-dur"><input id="d-dur" type="number" min={1} max={24} className={inputCls} value={draft.durationHrs || ''} onChange={(e) => set('durationHrs', num(e.target.value))} /></Field>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2">
         <Field label="Guests" htmlFor="d-exp" info="Your best guess. You can change it anytime on Guests and RSVPs, and it updates as people reply." hint={kidsOpen || draft.children > 0
           ? <span className="flex items-center gap-2"><label htmlFor="d-kids">Kids (included above)</label><input id="d-kids" type="number" min={0} className={cx(inputBase, 'min-h-9 w-20')} value={draft.children} onChange={(e) => set('children', Math.round(num(e.target.value)))} /></span>
           : <button type="button" className="font-semibold text-forest underline underline-offset-2" onClick={() => setKidsOpen(true)}>Any kids coming?</button>}>
@@ -387,7 +387,7 @@ export function DraftForm({ draft, onChange }: { draft: Draft; onChange: (d: Dra
         <Field label="Budget ($)" htmlFor="d-budget"><input id="d-budget" type="number" min={0} step={50} className={inputCls} value={draft.budget || ''} onChange={(e) => set('budget', num(e.target.value))} /></Field>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2">
         <Field label="Location" htmlFor="d-venue"><input id="d-venue" className={inputCls} value={draft.venue} onChange={(e) => set('venue', e.target.value)} placeholder="My house" /></Field>
         <SettingToggle id="d-setting" value={draft.setting} onChange={(v) => set('setting', v)} />
       </div>

@@ -80,7 +80,8 @@ export function Stat({ label, value, sub, tone, children }: { label: string; val
 
 export function Field({ label, hint, info, children, htmlFor, className }: { label: string; hint?: ReactNode; info?: ReactNode; children: ReactNode; htmlFor?: string; className?: string }) {
   return (
-    <div className={cx('grid content-start gap-1.5', className)}>
+    // min-w-0 and a shrinkable column: date and time boxes otherwise refuse to shrink on phones and push the page sideways
+    <div className={cx('grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-1.5', className)}>
       <span className="flex h-5 min-w-0 items-center gap-1">
         <label htmlFor={htmlFor} className="min-w-0 truncate text-sm font-semibold text-ink" title={label}>{label}</label>
         {info && <InfoTip label={`About ${label.toLowerCase()}`}>{info}</InfoTip>}
@@ -156,7 +157,7 @@ export function NumberInput({ value, onValue, min = 0, max, onFocus, onBlur, ...
 }
 
 export const inputBase =
-  'm2p-field min-h-11 rounded-xl border border-line-strong bg-paper px-3 text-[15px] text-ink placeholder:text-placeholder focus:border-forest';
+  'm2p-field min-h-11 min-w-0 rounded-xl border border-line-strong bg-paper px-3 text-[15px] text-ink placeholder:text-placeholder focus:border-forest';
 export const inputCls = `${inputBase} w-full`;
 
 export function Segmented<T extends string>({ value, onChange, options, label, size = 'md' }: { value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode }[]; label: string; size?: 'sm' | 'md' }) {
@@ -301,7 +302,7 @@ export function InfoTip({ label, children, align = 'left' }: { label: string; ch
         aria-expanded={open}
         aria-controls={id}
         onClick={() => setOpen((o) => !o)}
-        className={cx('grid size-7 place-items-center rounded-full transition-colors hover:bg-sage-soft hover:text-forest', open ? 'bg-sage-soft text-forest' : 'text-muted')}
+        className={cx("relative grid size-7 place-items-center rounded-full transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:bg-sage-soft hover:text-forest", open ? 'bg-sage-soft text-forest' : 'text-muted')}
       >
         <CircleHelp className="size-[18px]" aria-hidden="true" />
       </button>

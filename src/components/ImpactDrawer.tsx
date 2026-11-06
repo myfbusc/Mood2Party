@@ -3,7 +3,7 @@ import { ArrowRight, Building2, Check, ClipboardList, Loader2, Sparkles } from '
 import { useStore } from '../lib/store';
 import { storeShort } from '../lib/catalog';
 import { computeImpact, type ImpactRow } from '../lib/plan';
-import { costChange, money, plural, signed } from '../lib/format';
+import { costChange, money, plural, signed, qtyUnit } from '../lib/format';
 import { acceptChanges, type ConflictChoice } from '../lib/actions';
 import { aiErrorCopy, aiName, getSample } from '../lib/ai';
 import { Button, Drawer, Note, Pill, cx } from './ui';
@@ -262,7 +262,7 @@ export default function ImpactDrawer() {
         <details className="mt-6">
           <summary className="flex min-h-11 cursor-pointer items-center font-semibold text-forest">Unchanged ({unchanged.length}) and already owned ({owned.length})</summary>
           <ul className="mt-2 grid gap-1 text-sm text-muted">
-            {unchanged.map((r) => <li key={r.item.id}>{r.item.name}: {r.after.need} {r.item.unit}</li>)}
+            {unchanged.map((r) => <li key={r.item.id}>{r.item.name}: {qtyUnit(r.after.need, r.item.unit)}</li>)}
             {owned.map((r) => <li key={r.item.id}>{r.item.name}: you have {r.item.ownedQty}</li>)}
           </ul>
         </details>

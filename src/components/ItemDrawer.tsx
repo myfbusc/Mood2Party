@@ -3,7 +3,7 @@ import { Check, ChevronDown, House, Info, ShoppingCart, Plus, Trash2 } from 'luc
 import { useStore } from '../lib/store';
 import { CATEGORIES, CATEGORY_LABEL, CHANNEL_LABEL, RETAILERS, storeName } from '../lib/catalog';
 import { computeLine, optionFor, round2 } from '../lib/plan';
-import { costChange, money, plural } from '../lib/format';
+import { costChange, money, plural, qtyUnit } from '../lib/format';
 import { markPurchased, patchItem, setItemQuantity } from '../lib/actions';
 import { applySpend, costFnFor, hasLevels, itemAtTier, levelText, TIER_LABEL, TIER_SIGN, TIERS } from '../lib/tiers';
 import { Button, Drawer, Field, OptionalToggle, PaidInput, Segmented, cx, inputCls } from './ui';
@@ -211,7 +211,7 @@ export default function ItemDrawer({ id }: { id: string }) {
         <p className="-mt-1 flex gap-1.5 text-[13px] text-muted">
           <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
           <span>
-            Suggested {line.rec} {item.unit} for {head.total} guests: {item.ruleText.charAt(0).toLowerCase() + item.ruleText.slice(1)}.
+            Suggested {qtyUnit(line.rec, item.unit)} for {head.total} guests: {item.ruleText.charAt(0).toLowerCase() + item.ruleText.slice(1)}.
             {qty !== line.rec && <> <button type="button" className="font-semibold text-forest underline underline-offset-2" onClick={() => set('qty', String(line.rec))}>Use suggested ({line.rec})</button></>}
           </span>
         </p>
@@ -257,7 +257,7 @@ export default function ItemDrawer({ id }: { id: string }) {
           <Field label={`${(f.unit || "Units").charAt(0).toUpperCase()}${(f.unit || "Units").slice(1)} per pack`} htmlFor="it-pack"><input id="it-pack" type="number" min={1} className={inputCls} value={sel.packQty} onChange={(e) => setPrice(f.retailer, 'packQty', e.target.value)} /></Field>
           <Field label="Price per pack ($)" htmlFor="it-price"><input id="it-price" type="number" min={0} step={0.01} className={inputCls} value={sel.packPrice} onChange={(e) => setPrice(f.retailer, 'packPrice', e.target.value)} placeholder="0.00" /></Field>
           <p className="tnum col-span-2 text-[13px] text-muted">
-            {f.status === 'have' ? 'You have it, so nothing to buy.' : preview.pkgs ? <>{plural(preview.pkgs, 'pack')} × {money(opt.packPrice)} = <b className="text-ink">{money(preview.pkgs * opt.packPrice)}</b>{preview.leftover > 0 && <> · {preview.leftover} {f.unit} left over</>}</> : 'Nothing to buy.'}
+            {f.status === 'have' ? 'You have it, so nothing to buy.' : preview.pkgs ? <>{plural(preview.pkgs, 'pack')} × {money(opt.packPrice)} = <b className="text-ink">{money(preview.pkgs * opt.packPrice)}</b>{preview.leftover > 0 && <> · {qtyUnit(preview.leftover, f.unit)} left over</>}</> : 'Nothing to buy.'}
             {!item.removed && Math.abs(diff) >= 0.005 && <span className={cx('ml-1 font-semibold', diff > 0 ? 'text-danger' : 'text-ok')}>({costChange(diff)} than before)</span>}
           </p>
         </div>
