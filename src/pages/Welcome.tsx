@@ -173,11 +173,8 @@ function YourParties() {
   const own: Party[] = events.map((e) => ({ ...e, current: e.id === s.eventId && !s.isDemo }));
   // The open plan always shows its latest numbers
   const withLive = own.map((p) => (p.current ? { ...p, name: s.event.name, date: s.event.date, detail: eventDetail(s), tasksDone: s.tasks.filter((t) => t.status === 'done').length, tasksTotal: s.tasks.length } : p));
-  const parties: Party[] = withLive.length
-    ? withLive
-    : s.started && s.isDemo
-      ? [{ id: 'sample', name: s.event.name, date: s.event.date, updatedAt: Date.now(), tasksDone: s.tasks.filter((t) => t.status === 'done').length, tasksTotal: s.tasks.length, detail: eventDetail(s), current: true, sample: true }]
-      : [];
+  // Only the person's own parties: the sample party is not listed here
+  const parties: Party[] = withLive;
   if (!parties.length) return null;
 
   const upcoming = parties.filter((p) => p.date >= today).sort((a, b) => a.date.localeCompare(b.date));
