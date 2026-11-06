@@ -117,7 +117,9 @@ interface Ctx {
   events: EventSummary[];
   switchEvent: (id: string) => Promise<boolean>;
   duplicateEvent: (id: string) => Promise<void>;
-  deleteEvent: (id: string) => void;
+  deleteEvent: (id: string) => Promise<boolean>;
+  snapshotEvents: (ids: string[]) => Promise<AppState[]>;
+  restoreEvents: (states: AppState[]) => Promise<void>;
   clearAllEvents: () => void;
   // Account (Google sign-in) and saving
   cloud: CloudApi;
@@ -347,7 +349,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const toast = useCallback((t: Omit<Toast, 'id'>) => {
     const id = tid.current++;
     setToasts((all) => [...all.slice(-1), { ...t, id }]);
-    setTimeout(() => setToasts((all) => all.filter((x) => x.id !== id)), t.action ? 9000 : 4500);
+    setTimeout(() => setToasts((all) => all.filter((x) => x.id !== id)), t.action ? 5000 : 4500);
   }, []);
 
   const cloud = useCloud({ s, latest, setS, localIds: useMemo(() => Object.keys(library), [library]) });
@@ -406,12 +408,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     window.scrollTo({ top: 0 });
   }, [loadState]);
   const leftOnPurpose = useRef(new Set<string>()); // deleted or left here, so no "removed" message
-  const deleteEvent = useCallback((id: string) => {
+  // Deletes still being sent to the account: leaving the page now would cut them off, so the browser asks first
+  const sending = useRef(0);
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => { if (sending.current > 0) { e.preventDefault(); e.returnValue = ''; } };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, []);
+  /** Removes a party right away: deleted for the host, left for a co-host. Done once this resolves. */
+  const deleteEvent = useCallback(async (id: string) => {
     const c = cloudRef.current;
     leftOnPurpose.current.add(id);
     const m = c.metas.find((x) => x.id === id);
-    if (m && c.user && m.ownerId !== c.user.uid) c.removeMember(id, c.user.uid).catch(() => {}); // a co-host leaves
-    else c.remove(id).catch(() => {});
     setLibrary((l) => {
       const next = { ...l };
       delete next[id];
@@ -423,6 +431,40 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return next;
     });
     setS((cur) => (cur.eventId === id ? { ...blankState(cur.learnings), onboarding: { ...cur.onboarding, tourCompleted: false } } : cur));
+    if (!m || !c.user) return true; // only in this browser: already gone
+    sending.current++;
+    try {
+      if (m.ownerId !== c.user.uid) return await c.removeMember(id, c.user.uid); // a co-host leaves
+      await c.remove(id);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      sending.current--;
+    }
+  }, []);
+  /** Copies of parties taken just before deleting, so Undo can put them back. */
+  const snapshotEvents = useCallback(async (ids: string[]) => (await Promise.all(ids.map((id) => loadState(id)))).filter((x): x is AppState => !!x), [loadState]);
+  /** Undo: puts deleted parties back in this browser and, when signed in, in the account. */
+  const restoring = useRef(new Set<string>()); // put back by Undo: not "lost" if the account catches up late
+  const restoreEvents = useCallback(async (states: AppState[]) => {
+    const ids = states.map((st) => st.eventId).filter((x): x is string => !!x);
+    ids.forEach((id) => restoring.current.add(id));
+    setTimeout(() => ids.forEach((id) => restoring.current.delete(id)), 15000);
+    setLibrary((l) => {
+      const next = { ...l };
+      for (const st of states) if (st.eventId) next[st.eventId] = { id: st.eventId, name: st.event.name, date: st.event.date, updatedAt: Date.now(), s: st };
+      try { localStorage.setItem(LIB_KEY, JSON.stringify(next)); } catch { /* storage unavailable */ }
+      return next;
+    });
+    const c = cloudRef.current;
+    if (!c.user) return;
+    sending.current++;
+    try {
+      for (const st of states) await c.upload(st);
+    } finally {
+      sending.current--;
+    }
   }, []);
   const clearAllEvents = useCallback(() => {
     setLibrary({});
@@ -534,6 +576,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!cloud.lostIds.length) return;
     for (const id of cloud.lostIds) {
+      if (restoring.current.has(id)) { cloud.ackLost(id); continue; }
       const name = libRef.current[id]?.name ?? (latest.current.eventId === id ? latest.current.event.name : 'A party');
       setLibrary((l) => {
         if (!l[id]) return l;
@@ -559,7 +602,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const value: Ctx = {
     s, update, replace, page, go, drawer, open, close, tour, startTour, setTour, markDid, theme, toggleTheme, toasts, toast, dismiss, att, head, plan, changePending,
-    events, switchEvent, duplicateEvent, deleteEvent, clearAllEvents,
+    events, switchEvent, duplicateEvent, deleteEvent, snapshotEvents, restoreEvents, clearAllEvents,
     cloud, signOut, saveDeviceEventsToAccount, deviceBannerHidden, hideDeviceBanner,
     invite, acceptInvite, dismissInvite,
   };

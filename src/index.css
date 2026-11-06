@@ -369,3 +369,23 @@ select.m2p-field { padding-right: 2.25rem; background-position: right 0.75rem ce
 
 .m2p-range::-webkit-slider-runnable-track { height: 8px; border-radius: 999px; }
 .m2p-range::-webkit-slider-thumb { margin-top: -8px; }
+
+/* ── Hover, one look per kind of button ──────────────────────────────
+   Text links (blue text with no box): darker blue and an underline. */
+:is(button, summary, a).text-forest:not([class*="bg-"]):not([class*="border"]):not([class*="m2p-grad"]) {
+  transition: color 150ms, text-decoration-color 150ms;
+}
+:is(button, summary, a).text-forest:not([class*="bg-"]):not([class*="border"]):not([class*="m2p-grad"]):not(:disabled):hover {
+  color: var(--color-forest-ink);
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+/* Fold-out headers (Show more, Check the list…) follow the same rule, with a light tint behind */
+summary.text-forest:hover { background-color: color-mix(in srgb, var(--color-forest) 5%, transparent); }
+
+/* The chosen option in a set of choices (tabs, toggles, chips, status): a soft inner outline */
+:is([role="radio"][aria-checked="true"], [role="checkbox"][aria-checked="true"], button[aria-pressed="true"]):not(:disabled):hover,
+label:has(> input:checked.sr-only):hover {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--color-forest) 30%, transparent);
+}

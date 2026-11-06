@@ -169,19 +169,17 @@ const timeLabel = (hhmm?: string) => {
 
 const MONTH = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 const WEEKDAY_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const DELETE_DELAY = 9000; // matches how long a message with Undo stays up
 
 /** All saved parties as cards, soonest first; past ones fold away. Edit selects several to remove. */
 function YourParties() {
-  const { s, events, open, go, switchEvent, deleteEvent, duplicateEvent, toast } = useStore();
+  const { s, events, open, go, switchEvent, deleteEvent, snapshotEvents, restoreEvents, duplicateEvent, toast } = useStore();
   const today = todayISO();
-  // Removed here but waiting out the Undo
+  // Being removed right now (hidden at once, even before the account confirms)
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [confirmBulk, setConfirmBulk] = useState(false);
   const [showPast, setShowPast] = useState(false);
-  const timers = useRef(new Map<string, number>());
 
   const parties: Party[] = events
     .filter((e) => !pending.has(e.id))
@@ -206,20 +204,26 @@ function YourParties() {
     if (thenEdit) open({ type: 'event' });
   };
 
-  /** Hide now, remove for real once the Undo has passed. */
-  const removeLater = (list: Party[]) => {
+  /** Removes parties right away. Undo puts deleted ones back from a copy taken just before. */
+  const removeNow = async (list: Party[]) => {
     const ids = list.map((p) => p.id);
     setPending((cur) => new Set([...cur, ...ids]));
-    for (const id of ids) timers.current.set(id, window.setTimeout(() => { timers.current.delete(id); deleteEvent(id); setPending((cur) => { const n = new Set(cur); n.delete(id); return n; }); }, DELETE_DELAY));
-    const left = list.filter((p) => !p.isOwner).length;
-    const deleted = list.length - left;
-    const undo = () => {
-      for (const id of ids) { window.clearTimeout(timers.current.get(id)); timers.current.delete(id); }
-      setPending((cur) => { const n = new Set(cur); ids.forEach((id) => n.delete(id)); return n; });
-      toast({ title: list.length === 1 ? `${list[0].name} is back` : `${list.length} parties are back`, tone: 'info' });
-    };
-    const title = list.length === 1 ? `${list[0].name} ${left ? 'left' : 'deleted'}` : [deleted ? `${deleted} ${deleted === 1 ? 'party' : 'parties'} deleted` : '', left ? `${left} left` : ''].filter(Boolean).join(', ');
-    toast({ title, detail: left && !deleted ? 'It stays on the host\'s account.' : undefined, tone: 'info', action: { label: 'Undo', run: undo } });
+    const owned = list.filter((p) => p.isOwner);
+    const left = list.length - owned.length;
+    const copies = await snapshotEvents(owned.map((p) => p.id));
+    const results = await Promise.all(ids.map((id) => deleteEvent(id)));
+    setPending((cur) => { const n = new Set(cur); ids.forEach((id) => n.delete(id)); return n; });
+    const failed = list.filter((_, i) => !results[i]);
+    if (failed.length) {
+      toast({ title: `Couldn't remove ${failed.length === 1 ? failed[0].name : `${failed.length} parties`}`, detail: 'Check your connection and try again.', tone: 'warn' });
+      return;
+    }
+    const title = list.length === 1 ? `${list[0].name} ${left ? 'left' : 'deleted'}` : [owned.length ? `${owned.length} ${owned.length === 1 ? 'party' : 'parties'} deleted` : '', left ? `${left} left` : ''].filter(Boolean).join(', ');
+    const undo = copies.length ? async () => {
+      await restoreEvents(copies);
+      toast({ title: copies.length === 1 ? `${copies[0].event.name} is back` : `${copies.length} parties are back`, detail: left ? 'Parties you left need a new invite from their host.' : undefined, tone: 'info' });
+    } : undefined;
+    toast({ title, detail: left && !owned.length ? "It stays on the host's account." : undefined, tone: 'info', ...(undo ? { action: { label: 'Undo', run: () => { void undo(); } } } : {}) });
   };
 
   const toggle = (id: string) => setPicked((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -241,7 +245,7 @@ function YourParties() {
         onOpen={() => openParty(p)}
         onEditDetails={() => openParty(p, true)}
         onCopy={() => { duplicateEvent(p.id); toast({ title: `Copied ${p.name}`, detail: 'Nothing is bought, done or answered yet. Give the copy a name and date.', tone: 'success' }); }}
-        onRemove={() => removeLater([p])}
+        onRemove={() => { void removeNow([p]); }}
       />
     </li>
   );
@@ -289,7 +293,7 @@ function YourParties() {
               </span>
               <span className="flex gap-2">
                 <button type="button" onClick={() => setConfirmBulk(false)} className="min-h-10 rounded-full bg-paper/15 px-4 text-[14px] font-semibold hover:bg-paper/25">Back</button>
-                <button type="button" onClick={() => { removeLater(chosen); stopEditing(); }} className="min-h-10 rounded-full bg-danger px-4 text-[14px] font-bold text-white hover:brightness-110">Yes, {bulkLabel}</button>
+                <button type="button" onClick={() => { void removeNow(chosen); stopEditing(); }} className="min-h-10 rounded-full bg-danger px-4 text-[14px] font-bold text-white hover:brightness-110">Yes, {bulkLabel}</button>
               </span>
             </>
           ) : (
@@ -337,7 +341,13 @@ function PartyCard({ p, today, next, editing, selected, onToggle, onOpen, onEdit
   const item = 'flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[14px] font-medium hover:bg-sage-soft';
 
   return (
-    <div ref={wrap} className={cx('relative h-full rounded-[20px] border bg-paper shadow-[0_6px_18px_rgb(48_80_216/0.10)] transition-shadow', selected ? 'border-forest ring-[3px] ring-forest' : 'border-line')}>
+    <div ref={wrap} className={cx(
+      'group relative h-full rounded-[20px] border bg-paper shadow-[0_6px_18px_rgb(48_80_216/0.10)] transition duration-200 ease-out',
+      // Hover or keyboard focus: the card lifts a little, its shadow deepens and the outline picks up the brand color
+      'hover:-translate-y-1 hover:shadow-[0_14px_32px_rgb(48_80_216/0.22)] focus-within:-translate-y-1 focus-within:shadow-[0_14px_32px_rgb(48_80_216/0.22)] motion-reduce:transform-none',
+      selected ? 'border-forest ring-[3px] ring-forest' : 'border-line hover:border-forest/70 hover:ring-4 hover:ring-forest/15 focus-within:border-forest/70 focus-within:ring-4 focus-within:ring-forest/15',
+      menu && '-translate-y-1 border-forest/70 ring-4 ring-forest/15 shadow-[0_14px_32px_rgb(48_80_216/0.22)]',
+    )}>
       <button
         type="button"
         onClick={editing ? onToggle : onOpen}
@@ -345,7 +355,7 @@ function PartyCard({ p, today, next, editing, selected, onToggle, onOpen, onEdit
         aria-pressed={editing ? selected : undefined}
         className="block h-full w-full rounded-[20px] text-left"
       >
-        <span className={cx('m2p-grad flex items-center gap-3 rounded-t-[19px] px-3.5 py-3 pr-12', isPast && 'grayscale-[0.45]')}>
+        <span className={cx('m2p-grad flex items-center gap-3 rounded-t-[19px] px-3.5 py-3 pr-12 transition-[filter] duration-200 group-hover:brightness-110', isPast && 'grayscale-[0.45]')}>
           <span className={cx('grid w-[54px] shrink-0 place-items-center rounded-xl py-1.5 text-center leading-none', next ? 'bg-paper text-forest' : 'bg-white/20 text-white')} role="img" aria-label={dateLabel(p.date)}>
             <span aria-hidden="true" className="text-[11px] font-bold tracking-[0.08em]">{MONTH[dt.getMonth()]}</span>
             <span aria-hidden="true" className="tnum mt-0.5 font-display text-[24px] font-bold">{dt.getDate()}</span>
@@ -374,7 +384,7 @@ function PartyCard({ p, today, next, editing, selected, onToggle, onOpen, onEdit
           {selected && <Check className="size-4" strokeWidth={3} />}
         </span>
       ) : (
-        <button type="button" onClick={() => { setMenu((m) => !m); setConfirm(false); }} aria-label={`More for ${p.name}`} aria-haspopup="menu" aria-expanded={menu} className={cx('absolute right-2.5 top-2.5 grid size-9 place-items-center rounded-xl transition-colors', menu ? 'bg-paper text-forest' : 'bg-white/20 text-white hover:bg-white/30')}>
+        <button type="button" onClick={() => { setMenu((m) => !m); setConfirm(false); }} aria-label={`More for ${p.name}`} aria-haspopup="menu" aria-expanded={menu} className={cx('absolute right-2.5 top-2.5 grid size-9 place-items-center rounded-xl transition-colors', menu ? 'bg-paper text-forest hover:bg-sage-soft' : 'bg-white/20 text-white hover:bg-white/35')}>
           <MoreHorizontal className="size-5" aria-hidden="true" />
         </button>
       )}

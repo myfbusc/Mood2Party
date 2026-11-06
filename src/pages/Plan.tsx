@@ -309,7 +309,7 @@ function ListCheck() {
             <ul className="mt-2 flex flex-wrap gap-2">
               {missing.map((m) => (
                 <li key={m.name}>
-                  <button type="button" onClick={() => open({ type: 'add-item', category: m.category, name: m.name, unit: m.unit })} className="inline-flex min-h-9 items-center gap-1 rounded-full border border-line bg-paper px-3 text-[13px] font-semibold hover:border-forest/60">
+                  <button type="button" onClick={() => open({ type: 'add-item', category: m.category, name: m.name, unit: m.unit })} className="inline-flex min-h-9 items-center gap-1 rounded-full border border-line bg-paper px-3 text-[13px] font-semibold transition-colors hover:border-forest/60 hover:bg-sage-soft hover:text-forest">
                     <Plus className="size-3.5" aria-hidden="true" /> {m.name}
                   </button>
                 </li>
@@ -327,7 +327,7 @@ function ListCheck() {
                   <button
                     type="button"
                     onClick={() => { update((p) => patchItem(p, l.item.id, { removed: true, removedReason: 'venue' })); toast({ title: `${l.item.name}: already provided`, detail: `Saves ${money(l.cost)}. Bring it back from "Off the list".`, tone: 'info' }); }}
-                    className="inline-flex min-h-9 items-center gap-1 rounded-full border border-line bg-paper px-3 text-[13px] font-semibold hover:border-forest/60"
+                    className="inline-flex min-h-9 items-center gap-1 rounded-full border border-line bg-paper px-3 text-[13px] font-semibold transition-colors hover:border-forest/60 hover:bg-sage-soft hover:text-forest"
                   >
                     <Building2 className="size-3.5" aria-hidden="true" /> {l.item.name}
                   </button>

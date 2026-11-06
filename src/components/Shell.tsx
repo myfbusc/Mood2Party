@@ -28,7 +28,7 @@ export function Logo() {
     <button
       type="button"
       onClick={toggleTheme}
-      className="group flex items-center gap-2 rounded-lg text-left"
+      className="group flex items-center gap-2 rounded-lg text-left transition-[filter,opacity] duration-150 hover:opacity-90 hover:brightness-110"
       aria-label="Mood2Party"
       aria-pressed={midnight}
       title={midnight ? 'Lights back on' : 'Party after dark?'}
@@ -87,8 +87,8 @@ function NavList({ onPick }: { onPick?: () => void }) {
                   onPick?.();
                 }}
                 className={cx(
-                  'flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-[15px] font-semibold transition-colors duration-150',
-                  active ? 'm2p-grad' : 'text-ink hover:bg-nav-hover',
+                  'flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-[15px] font-semibold transition duration-150',
+                  active ? 'm2p-grad hover:brightness-110' : 'text-ink hover:bg-nav-hover',
                 )}
               >
                 <Icon className={cx('size-[18px] shrink-0', !active && 'text-forest')} />

@@ -16,7 +16,7 @@ export function MenuFields({ idPrefix, food, drinks, onFood, onDrinks, aiNote }:
     <ul className="mt-1.5 flex flex-wrap gap-1.5" aria-label={label}>
       {words.filter((w) => !splitList(text).some((x) => x.toLowerCase() === w.toLowerCase())).map((w) => (
         <li key={w}>
-          <button type="button" onClick={() => add(text, w, set)} className="inline-flex min-h-8 items-center gap-1 rounded-full border border-line bg-paper px-2.5 text-[13px] font-semibold text-ink hover:border-forest/60">
+          <button type="button" onClick={() => add(text, w, set)} className="inline-flex min-h-8 items-center gap-1 rounded-full border border-line bg-paper px-2.5 text-[13px] font-semibold text-ink transition-colors hover:border-forest/60 hover:bg-sage-soft hover:text-forest">
             <Plus className="size-3.5" aria-hidden="true" /> {w}
           </button>
         </li>

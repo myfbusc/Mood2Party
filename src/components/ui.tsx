@@ -10,7 +10,7 @@ export function Button({
   const v: Record<BtnVariant, string> = {
     primary: 'm2p-grad border border-transparent hover:brightness-110',
     secondary: 'bg-paper text-forest border border-forest/70 hover:bg-sage-soft',
-    ghost: 'bg-transparent text-ink border border-line-strong hover:bg-paper',
+    ghost: 'bg-transparent text-ink border border-line-strong hover:bg-chip hover:border-forest/40',
     quiet: 'bg-transparent text-forest border border-transparent hover:bg-sage-soft',
     danger: 'bg-paper text-danger border border-danger/40 hover:bg-danger-soft',
     coral: 'bg-coral text-on-coral border border-coral hover:brightness-95',
@@ -104,7 +104,7 @@ export function ToggleChips<T extends string>({ label, options, value, onChange,
             role="checkbox"
             aria-checked={on}
             onClick={() => onChange(on ? value.filter((v) => v !== o.value) : [...value, o.value])}
-            className={cx('inline-flex min-h-10 items-center gap-1.5 rounded-full border px-3.5 text-[14px] font-semibold transition-colors', on ? 'border-forest bg-sage-soft text-forest' : 'border-line-strong bg-paper text-muted hover:text-ink')}
+            className={cx('inline-flex min-h-10 items-center gap-1.5 rounded-full border px-3.5 text-[14px] font-semibold transition-colors', on ? 'border-forest bg-sage-soft text-forest' : 'border-line-strong bg-paper text-muted hover:border-forest/50 hover:bg-sage-soft/50 hover:text-ink')}
           >
             <span className={cx('grid size-4 place-items-center rounded-full border', on ? 'm2p-grad border-transparent' : 'border-line-strong')} aria-hidden="true">{on && <Check className="size-3" strokeWidth={3} />}</span>
             {o.label}
@@ -172,7 +172,7 @@ export function Segmented<T extends string>({ value, onChange, options, label, s
           className={cx(
             'shrink-0 whitespace-nowrap rounded-lg px-3 font-semibold transition-colors duration-150',
             size === 'sm' ? 'min-h-8 text-[13px]' : 'min-h-10 text-sm',
-            value === o.value ? 'bg-paper text-forest shadow-sm' : 'text-muted hover:text-ink',
+            value === o.value ? 'bg-paper text-forest shadow-sm' : 'text-muted hover:bg-paper/60 hover:text-ink',
           )}
         >
           {o.label}
@@ -386,7 +386,7 @@ export function SettingToggle({ id, value, onChange }: { id: string; value: 'ind
       <div role="radiogroup" aria-labelledby={`${id}-label`} className="grid min-h-11 grid-cols-2 overflow-hidden rounded-xl border border-line-strong bg-paper">
         {(['indoors', 'outdoors'] as const).map((v) => (
           <button key={v} type="button" role="radio" aria-checked={value === v} onClick={() => onChange(v)}
-            className={cx('text-sm font-semibold transition-colors', value === v ? 'bg-sage-soft text-forest' : 'text-muted hover:text-ink')}>
+            className={cx('text-sm font-semibold transition-colors', value === v ? 'bg-sage-soft text-forest' : 'text-muted hover:bg-sage-soft/50 hover:text-ink')}>
             {v === 'indoors' ? 'Indoors' : 'Outdoors'}
           </button>
         ))}
