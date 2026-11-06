@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react';
-import { ArrowLeft, Check, CheckCircle2, ChevronDown, Info, Loader2, Sparkles, Wand2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronDown, Info, Loader2, Sparkles, Wand2 } from 'lucide-react';
 import { useStore } from '../lib/store';
-import { extractNames, parseDescription, SAMPLE_DESCRIPTION, emptyDraft, type Draft } from '../lib/parse';
+import { completeDraft, extractNames, parseDescription, SAMPLE_DESCRIPTION, emptyDraft, type Draft, type Field as PlanField } from '../lib/parse';
 import { planFromDraft } from '../lib/actions';
-import { FOOD_FORMAT_LABEL } from '../lib/catalog';
 import { aiErrorCopy, aiName, aiNeedsSignIn, getSample } from '../lib/ai';
 import { Logo } from '../components/Shell';
 import { HelperChips } from '../components/HelperChips';
@@ -11,12 +10,14 @@ import { MenuFields } from '../components/MenuFields';
 import { aiFillMenuItems, applyPatches } from '../lib/menuAi';
 import { stateHeadcount } from '../lib/attendance';
 import { plural } from '../lib/format';
-import type { AppState } from '../lib/types';
+import type { AppState, Category } from '../lib/types';
+import type { ReactNode } from 'react';
 import { parseMenu } from '../lib/menuText';
+import { fitToBudget, SpendLevels, useSpendCosts, type Spend } from '../components/SpendLevels';
+import { money } from '../lib/format';
 import { Button, Card, Field, InfoTip, Note, Segmented, SettingToggle, cx, inputBase, inputCls } from '../components/ui';
-import type { Alcohol, FoodFormat, SoftDrink } from '../lib/types';
 
-type Step = 'describe' | 'review';
+type Step = 'describe' | 'review' | 'spend';
 
 export default function Setup() {
   const { s, replace, update, go, toast, cloud } = useStore();
@@ -30,6 +31,7 @@ export default function Setup() {
   const [aiBusy, setAiBusy] = useState(false);
   const [aiNote, setAiNote] = useState('');
   const [aiSignIn, setAiSignIn] = useState(false);
+  const [spend, setSpend] = useState<Spend>({});
 
   // Check again after signing in or out: on the public site the AI needs a Google sign-in
   useEffect(() => {
@@ -57,86 +59,106 @@ export default function Setup() {
     setAiNote('');
     const base = parseDescription(text);
     try {
-      const out = await sample.json<Partial<Draft> & { assumptions?: string[] }>(
-        `You help a DIY host set up an event plan. Read their description closely and pull out everything you can, including what is implied.
+      const out = await sample.json<Partial<Draft> & { assumptions?: string[]; stated?: string[]; found?: string[] }>(
+        `You help a DIY host set up an event plan. Read their description closely and pull out only what it says or clearly implies. Never invent details: anything the description does not give is filled in afterwards with defaults that fit the kind of party.
 Today is ${new Date().toISOString().slice(0, 10)}.
 Rules:
-- Work out the occasion from any hint: holidays (Halloween, Friendsgiving, New Year's Eve, Diwali...), life events (birthdays with the age, graduations, showers, retirements, going-away...), and themed parties ("ugly sweater party", "murder mystery dinner"). Never answer "general party" or "Party" if the text names or hints at any occasion.
-- If someone is being celebrated, note who ("Maya's graduation", "for my son Leo" gives Leo).
-- name: suggest a short, clear event name the host would use, in Title Case, built from who it is for and the occasion, e.g. "Leo's 7th Birthday Party", "Halloween Costume Party", "Ana's Surprise 40th". Not a sentence.
-- Dates can be relative to a holiday or to today: "the day before Halloween" (Oct 30), "Christmas Eve", "the weekend before Christmas" (the Saturday before), "the Saturday after Thanksgiving", "two days before New Year's", "next Friday", "in two weeks". Always work out the exact calendar date; never say no date was given when one is described like this.
-- venue: the place in the host's own words, keeping the details, e.g. "Pool on the rooftop of my apartment", "Jake's place", "Nobu, Malibu", "Backyard of my parents' house". Rooftops, pools, parks, beaches, yards, patios and terraces are "outdoors".
-- If no date is given but the occasion has a usual date (Halloween Oct 31, New Year's Eve Dec 31, Fourth of July, Thanksgiving...), use the next one: the day itself if it is a Friday or Saturday or the party must be on the day, otherwise the Saturday before. Otherwise use ${base.draft.date}.
-- If no time is given, pick a sensible start for the occasion (brunch 11:00, kids' party 14:00, dinner 18:30, Halloween 19:00, New Year's Eve 20:00).
-- If no theme is given, suggest one that fits the occasion.
-- If only kids are counted ("15 kids and their parents"), estimate the total guests including adults.
-Reply with only a JSON object with these keys:
-name, type (the occasion in a few words, e.g. "Halloween party", "7th birthday party"), honoree (who it is for, or ""), date (YYYY-MM-DD, a future date), startTime (HH:MM 24h), durationHrs (number),
-venue, setting ("indoors" or "outdoors"), foodFormat (one of "buffet","taco-bar","bbq","appetizers","potluck"),
-dietary, theme, budget (number, USD), guestMin, guestExpected, guestMax (numbers), children (number of kids expected, 0 if none),
-helpers (array of the organizing team's first names only, never the host; e.g. "me and my boyfriend Lucas" gives ["Lucas"]; use "Helper 1" etc. if only a count is given),
-extraFood (array of other food styles also served, from "buffet","taco-bar","bbq","appetizers","potluck", not repeating foodFormat),
-alcohol (one of "none","beer-wine","full-bar","byob"), softDrinks (array from "soda","water","juice","coffee-tea"),
-preferences (short comma-separated list of activities and wishes, e.g. "costume contest, pumpkin carving, music"; "" if none),
-foodText (every food mentioned, as a short comma-separated list in plain words, e.g. "taco bar, pupusas, cupcakes"; "" if none),
+- Work out the occasion from any hint: holidays (Halloween, Friendsgiving, New Year's Eve, Diwali...), life events (birthdays with the age, graduations, showers, retirements, celebrations of life, going-away...), and themed parties ("ugly sweater party", "murder mystery dinner"). Keep the host's own kind of gathering ("Christmas brunch", "book club dinner", "10th birthday pool party"). Never answer "Party" if the text names or hints at any occasion.
+- If someone is being celebrated, note who ("Maya's graduation", "for my son Leo" gives Leo, "Jake and Mia's engagement").
+- name: a short, clear event name in Title Case from who it is for and the occasion, e.g. "Leo's 7th Birthday Party", "Halloween Costume Party". Not a sentence.
+- Dates can be relative or loose: "the day before Halloween" (Oct 30), "the weekend before Christmas" (the Saturday before), "next Friday", "in two weeks", "Saturday the 21st", "mid-December" (a Saturday mid-month), "the first weekend of March". Work out the exact future calendar date.
+- Times without am/pm: "at 7" for a party is 7 PM; "at 10" for a brunch is 10 AM. "From 4 to 7" gives a start and a length. "Until midnight" gives the length.
+- Guests: "a few friends" is about 5, "a dozen" 12, "10 couples" 20, "50+" about 55-60, "up to 40" about 35 (max 40), a range gives min and max. "15 kids and their parents" is about 30 with 15 kids. "Adults only" means 0 kids.
+- venue: the place in the host's own words, keeping details ("Pool on the rooftop of my apartment", "Nobu, Malibu"). Rooftops, pools, parks, beaches, yards, patios and terraces are "outdoors".
+- dietary: only needs actually mentioned (vegetarian, vegan, gluten-free, nut allergy, halal, kosher...).
+Reply with only a JSON object with these keys. Use null for any value the description does not give:
+stated (array of the parts the description actually gave, from: "type","date","time","duration","guests","kids","budget","setting","venue","food","drinks","theme","dietary","helpers"),
+name, type (the occasion in a few words, e.g. "Halloween party", "7th birthday party"), honoree (who it is for, or ""), date (YYYY-MM-DD), startTime (HH:MM 24h), durationHrs (number),
+venue, setting ("indoors" or "outdoors"), dietary, theme, budget (number, USD total; a per-person amount times the guests), guestMin, guestExpected, guestMax (numbers), children (number of kids expected),
+helpers (array of the organizing team's first names only, never the host; e.g. "me and my boyfriend Lucas" gives ["Lucas"]; "Helper 1" etc. if only a count is given),
+preferences (short comma-separated list of activities and wishes, e.g. "costume contest, pumpkin carving"; "" if none),
+foodText (every food mentioned, short comma-separated plain words, e.g. "taco bar, pupusas, cupcakes"; "" if none),
 drinksText (every drink mentioned, comma-separated, e.g. "water, lemonade, beer"; "" if none),
-found (array of short "Label: value" notes for what the description actually said, e.g. "Occasion: Halloween party", "For: Leo", "Guests: about 30", "Extras: costume contest"),
-assumptions (array of short plain-language sentences for each thing you had to guess or suggest, including the suggested name, date, time and theme when they were not stated). Never list something as missing or guessed if the description gave it, even in other words; a relative date you worked out goes in found, e.g. "Date: Friday, October 30 (the day before Halloween)".
+found (array of short "Label: value" notes for what the description said, e.g. "Occasion: Halloween party", "For: Leo", "Guests: about 30", "Date: Friday, October 30 (the day before Halloween)"),
+assumptions (array of short plain sentences only for things you had to interpret, e.g. "10 couples counted as 20 guests." Do not mention missing details; those are handled separately).
 
 Description:
 """${text.slice(0, 4000)}"""`,
         { modelTier: 'quick' },
       );
+      const FIELDS: PlanField[] = ['type', 'date', 'time', 'duration', 'guests', 'kids', 'budget', 'setting', 'venue', 'food', 'drinks', 'theme', 'dietary', 'helpers'];
+      const baseStated = new Set<PlanField>(base.stated);
+      const aiStated = new Set<PlanField>((Array.isArray(out.stated) ? out.stated : []).map(String).filter((f): f is PlanField => (FIELDS as string[]).includes(f)));
+      const stated = new Set<PlanField>([...baseStated, ...aiStated]);
       const d: Draft = { ...base.draft };
       const said = (v: unknown) => typeof v === 'string' && v.trim() && !/^(?:general )?party$/i.test(v.trim());
-      const num = (v: unknown, fb: number) => (typeof v === 'number' && isFinite(v) && v >= 0 ? v : fb);
-      const str = (v: unknown, fb: string) => (typeof v === 'string' && v.trim() ? v.trim() : fb);
+      const num = (v: unknown) => (typeof v === 'number' && isFinite(v) && v >= 0 ? v : null);
+      const str = (v: unknown) => (typeof v === 'string' && v.trim() && !/^(?:null|none|n\/a|unknown|tbd)$/i.test(v.trim()) ? v.trim() : null);
+      const ai = (f: PlanField) => aiStated.has(f);
       if (said(out.name)) d.name = String(out.name).trim().slice(0, 80);
-      if (said(out.type)) d.type = String(out.type).trim().slice(0, 60);
-      d.date = /^\d{4}-\d{2}-\d{2}$/.test(String(out.date)) && String(out.date) >= new Date().toISOString().slice(0, 10) ? String(out.date) : d.date;
-      d.startTime = /^\d{2}:\d{2}$/.test(String(out.startTime)) ? String(out.startTime) : d.startTime;
-      d.durationHrs = num(out.durationHrs, d.durationHrs) || d.durationHrs;
-      // Keep the built-in reader's place when the AI only gives a generic one
-      d.venue = str(out.venue, d.venue);
-      if (/^(?:home|my place|house|tbd|unknown|n\/a)?$/i.test(d.venue.trim()) && !/^(?:home|backyard)$/i.test(base.draft.venue)) d.venue = base.draft.venue;
-      d.setting = out.setting === 'outdoors' || out.setting === 'indoors' ? out.setting : d.setting;
-      d.foodFormat = (Object.keys(FOOD_FORMAT_LABEL) as FoodFormat[]).includes(out.foodFormat as FoodFormat) ? (out.foodFormat as FoodFormat) : d.foodFormat;
-      d.dietary = str(out.dietary, d.dietary);
-      d.theme = str(out.theme, d.theme);
-      d.budget = num(out.budget, d.budget) || d.budget;
-      d.guestMin = Math.round(num(out.guestMin, d.guestMin));
-      d.guestExpected = Math.round(num(out.guestExpected, d.guestExpected));
-      d.guestMax = Math.round(num(out.guestMax, d.guestMax));
-      d.children = Math.round(num((out as { children?: unknown }).children, d.children));
-      if (Array.isArray(out.helpers)) d.helpers = [...new Set(out.helpers.flatMap((h) => extractNames(String(h)).names))].slice(0, 10);
-      const FOODS = Object.keys(FOOD_FORMAT_LABEL) as FoodFormat[];
-      if (Array.isArray(out.extraFood)) d.extraFood = out.extraFood.filter((f): f is FoodFormat => FOODS.includes(f as FoodFormat) && f !== d.foodFormat);
-      if (['none', 'beer-wine', 'full-bar', 'byob'].includes(String(out.alcohol))) d.alcohol = out.alcohol as Alcohol;
-      if (Array.isArray(out.softDrinks)) d.softDrinks = out.softDrinks.filter((x): x is SoftDrink => ['soda', 'water', 'juice', 'coffee-tea'].includes(String(x)));
-      d.preferences = str(out.preferences, d.preferences);
-      if (typeof out.foodText === 'string') d.foodText = out.foodText.trim().slice(0, 300);
-      if (typeof out.drinksText === 'string') d.drinksText = out.drinksText.trim().slice(0, 300);
-      { const m = parseMenu(d.foodText, d.drinksText); if (d.foodText) { d.foodFormat = m.foodFormat; d.extraFood = m.extraFood; } if (d.drinksText) { d.alcohol = m.alcohol; d.softDrinks = m.softDrinks; } }
-      // The built-in reader is exact about dates and places it finds in the text, so those win
-      const baseDate = base.found.find((f) => /^Date:/.test(f));
-      const basePlace = base.found.find((f) => /^Place:/.test(f));
-      if (baseDate) d.date = base.draft.date;
-      if (base.found.includes('Outdoors') || base.found.includes('Indoors')) d.setting = base.draft.setting;
-      if (basePlace && (!out.venue || String(out.venue).length < base.draft.venue.length / 2)) d.venue = base.draft.venue;
-      setDraft(d);
-      // Only show the AI's own notes, minus any that call something missing that the description gave
-      let aiNotes = Array.isArray(out.assumptions) ? out.assumptions.map(String).filter(Boolean).slice(0, 8) : [];
-      if (baseDate) aiNotes = aiNotes.filter((n) => !/\b(?:no|didn'?t|not)\b.*\bdate\b|\bdate\b.*\b(?:not|wasn'?t) (?:given|mentioned|found)/i.test(n));
-      if (basePlace) aiNotes = aiNotes.filter((n) => !/\b(?:no|didn'?t|not)\b.*\b(?:location|place|venue)\b|\b(?:location|place|venue)\b.*\b(?:not|wasn'?t) (?:given|mentioned|found)/i.test(n));
-      const dateFromAi = /^\d{4}-\d{2}-\d{2}$/.test(String(out.date)) && String(out.date) >= new Date().toISOString().slice(0, 10);
-      if (!dateFromAi && !baseDate && !aiNotes.some((n) => /date/i.test(n))) aiNotes.push(base.assumptions.find((n) => /date/i.test(n)) ?? 'No date was found, so a placeholder date is used.');
-      setAssumptions(aiNotes.length ? aiNotes : [`${aiName() === 'Claude' ? 'Claude' : 'The AI'} read your description. Check the details below.`]);
-      let aiFound = Array.isArray((out as { found?: unknown }).found) ? ((out as { found: unknown[] }).found).map(String).filter(Boolean).slice(0, 12) : [];
+      if (said(out.type)) { d.type = String(out.type).trim().slice(0, 60); stated.add('type'); }
+      // The built-in reader is exact about dates, times, places and numbers it finds in the text, so those win
+      const today = new Date().toISOString().slice(0, 10);
+      if (ai('date') && !baseStated.has('date') && /^\d{4}-\d{2}-\d{2}$/.test(String(out.date)) && String(out.date) >= today) d.date = String(out.date);
+      else if (!baseStated.has('date')) stated.delete('date');
+      if (ai('time') && !baseStated.has('time') && /^\d{2}:\d{2}$/.test(String(out.startTime))) d.startTime = String(out.startTime);
+      else if (!baseStated.has('time')) stated.delete('time');
+      if (ai('duration') && !baseStated.has('duration') && num(out.durationHrs)) d.durationHrs = num(out.durationHrs)!;
+      else if (!baseStated.has('duration')) stated.delete('duration');
+      if (ai('guests') && num(out.guestExpected)) {
+        const exp = Math.round(num(out.guestExpected)!);
+        if (!baseStated.has('guests') || Math.abs(exp - base.draft.guestExpected) > Math.max(3, base.draft.guestExpected * 0.3)) {
+          d.guestExpected = exp;
+          d.guestMin = Math.round(num(out.guestMin) ?? exp * 0.8);
+          d.guestMax = Math.round(num(out.guestMax) ?? exp * 1.2);
+        }
+      } else if (!baseStated.has('guests')) stated.delete('guests');
+      if (ai('kids') && num((out as { children?: unknown }).children) !== null && !baseStated.has('kids')) d.children = Math.round(num((out as { children?: unknown }).children)!);
+      else if (!baseStated.has('kids')) stated.delete('kids');
+      d.children = Math.min(d.children, d.guestExpected || d.children);
+      if (ai('budget') && num(out.budget) && !baseStated.has('budget')) d.budget = Math.round(num(out.budget)!);
+      else if (!baseStated.has('budget')) stated.delete('budget');
+      if (ai('venue') && str(out.venue)) {
+        const v = str(out.venue)!;
+        if (!baseStated.has('venue') || (!/^(?:home|my place|house)$/i.test(v) && v.length >= base.draft.venue.length / 2)) d.venue = v.slice(0, 120);
+      } else if (!baseStated.has('venue')) stated.delete('venue');
+      if (!baseStated.has('setting') && ai('setting') && (out.setting === 'outdoors' || out.setting === 'indoors')) d.setting = out.setting;
+      else if (!baseStated.has('setting')) stated.delete('setting');
+      if (ai('theme') && str(out.theme)) d.theme = str(out.theme)!;
+      else if (!baseStated.has('theme')) stated.delete('theme');
+      if (ai('dietary') && str(out.dietary)) d.dietary = str(out.dietary)!;
+      if (ai('helpers') && Array.isArray(out.helpers)) {
+        const names = [...new Set(out.helpers.flatMap((h) => extractNames(String(h)).names))].slice(0, 10);
+        if (names.length >= d.helpers.length) d.helpers = names;
+      }
+      if (str(out.preferences)) d.preferences = str(out.preferences)!;
+      if (ai('food') && str(out.foodText)) d.foodText = str(out.foodText)!.slice(0, 300);
+      else if (!baseStated.has('food')) stated.delete('food');
+      if (ai('drinks') && str(out.drinksText)) d.drinksText = str(out.drinksText)!.slice(0, 300);
+      else if (!baseStated.has('drinks')) stated.delete('drinks');
+      // Everything not stated gets the same defaults the built-in reader uses, fitted to the occasion the AI found
+      const age = Number(d.type.match(/(\d{1,3})(?:st|nd|rd|th)\s+birthday/i)?.[1] ?? base.ctx.age ?? NaN);
+      const birthday = base.ctx.birthday || /birthday/i.test(d.type);
+      const ctx = { ...base.ctx, birthday, age: isNaN(age) ? null : age, kidsParty: base.ctx.kidsParty || (birthday && !isNaN(age) && age <= 12) || /\bkids'?\b|children'?s/i.test(d.type) };
+      const done = completeDraft(d, stated, ctx);
+      const final = done.draft;
+      { const m = parseMenu(final.foodText, final.drinksText); if (final.foodText) { final.foodFormat = m.foodFormat; final.extraFood = m.extraFood; } if (final.drinksText) { final.alcohol = m.alcohol; final.softDrinks = m.softDrinks; } }
+      final.venueCapacity = Math.max(final.venueCapacity, final.guestMax + 10);
+      setDraft(final);
+      // Notes: how the AI read things, then what was filled in and why
+      const aiNotes = (Array.isArray(out.assumptions) ? out.assumptions.map(String).filter(Boolean) : [])
+        .filter((n) => !/\b(?:no|not|wasn'?t|didn'?t|missing|unspecified|assumed|default)\b/i.test(n)).slice(0, 4);
+      const nameNote = final.name && final.name !== 'Party' ? `Suggested the name "${final.name}". Change it below.` : 'Give your event a name below.';
+      const dateNote = !stated.has('date') ? base.assumptions.filter((n) => /date/i.test(n)) : [];
+      const helperNote = final.helpers.length ? [] : base.assumptions.filter((n) => /organizers/i.test(n));
+      setAssumptions([nameNote, ...aiNotes, ...dateNote, ...done.notes, ...helperNote]);
+      let aiFound = Array.isArray(out.found) ? out.found.map(String).filter(Boolean).slice(0, 12) : [];
       // Show the date and place that are used, in the same words as the form below
-      aiFound = aiFound.filter((f) => !(baseDate && /^Date:/i.test(f)) && !(basePlace && /^(?:Place|Location|Venue):/i.test(f)));
+      const baseDate = base.found.find((f) => /^Date:/.test(f));
+      aiFound = aiFound.filter((f) => !(baseDate && /^Date:/i.test(f)) && !(stated.has('venue') && /^(?:Place|Location|Venue):/i.test(f)));
       if (baseDate) aiFound.push(baseDate);
-      if (basePlace) aiFound.push(`Place: ${d.venue}`);
-      setFound(aiFound);
+      if (stated.has('venue')) aiFound.push(`Place: ${final.venue}`);
+      setFound(aiFound.length ? aiFound : base.found);
       setStep('review');
       window.scrollTo({ top: 0 });
     } catch (e) {
@@ -189,7 +211,7 @@ Description:
 
   const generate = () => {
     if (problems.length) return;
-    const next = planFromDraft(s, draft);
+    const next = planFromDraft(s, draft, spend);
     replace(next);
     go('overview');
     fillMenuWithAi(next);
@@ -207,8 +229,8 @@ Description:
 
       <main className="mx-auto max-w-[880px] px-4 pb-24 sm:px-6">
         <ol className="mb-6 flex flex-wrap gap-2 text-sm" aria-label="Setup steps">
-          {['Describe Your Event', 'Check the Details', 'Get Your Plan'].map((label, i) => {
-            const idx = step === 'describe' ? 0 : 1;
+          {['Describe Your Event', 'Check the Details', 'Choose Your Spending', 'Get Your Plan'].map((label, i) => {
+            const idx = step === 'describe' ? 0 : step === 'review' ? 1 : 2;
             return (
               <li key={label} aria-current={i === idx ? 'step' : undefined} className={cx('rounded-full px-3 py-1 font-semibold', i <= idx ? 'm2p-grad' : 'bg-paper text-muted border border-line')}>
                 {i + 1}. {label}
@@ -281,16 +303,62 @@ Description:
             )}
 
             <div className="mt-6 flex flex-col gap-2 sm:flex-row">
-              <Button size="lg" onClick={needsSignIn ? signInThenGenerate : generate} disabled={problems.length > 0 || waitingForSignIn}>
-                {waitingForSignIn ? <Loader2 className="size-5 animate-spin" /> : <CheckCircle2 className="size-5" />} {needsSignIn ? 'Sign In and Generate My Plan' : 'Generate My Plan'}
+              <Button size="lg" onClick={() => { setStep('spend'); window.scrollTo({ top: 0 }); }} disabled={problems.length > 0}>
+                Next: Choose Your Spending <ArrowRight className="size-5" />
               </Button>
               <Button size="lg" variant="ghost" onClick={() => setStep('describe')}>Back</Button>
             </div>
-            {needsSignIn && <p className="mt-2 text-[13px] text-muted">Your plan is saved to your Google account, so it's there on any device and you can invite co-hosts.</p>}
           </>
+        )}
+
+        {step === 'spend' && (
+          <SpendStep draft={draft} spend={spend} onChange={(c, t) => setSpend((p) => ({ ...p, [c]: t }))} onSet={setSpend}>
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row">
+              <Button size="lg" onClick={needsSignIn ? signInThenGenerate : generate} disabled={problems.length > 0 || waitingForSignIn}>
+                {waitingForSignIn ? <Loader2 className="size-5 animate-spin" /> : <CheckCircle2 className="size-5" />} {needsSignIn ? 'Sign In and Generate My Plan' : 'Generate My Plan'}
+              </Button>
+              <Button size="lg" variant="ghost" onClick={() => { setStep('review'); window.scrollTo({ top: 0 }); }}>Back</Button>
+            </div>
+            {needsSignIn && <p className="mt-2 text-[13px] text-muted">Your plan is saved to your Google account, so it's there on any device and you can invite co-hosts.</p>}
+          </SpendStep>
         )}
       </main>
     </div>
+  );
+}
+
+/** Step 3: how nice each kind of thing should be, with what it costs for this party. */
+function SpendStep({ draft, spend, onChange, onSet, children }: { draft: Draft; spend: Spend; onChange: (c: Category, level: number) => void; onSet: (sp: Spend) => void; children: ReactNode }) {
+  const { s, toast } = useStore();
+  const preview = useMemo(() => planFromDraft(s, draft), [s, draft]);
+  const head = useMemo(() => stateHeadcount(preview), [preview]);
+  const { total } = useSpendCosts(preview, head, spend);
+  const left = draft.budget - total;
+  return (
+    <>
+      <h1 className="text-[28px] font-bold tracking-tight md:text-[32px]">Choose Your Spending</h1>
+      <p className="mt-1 text-muted">Save on some things and spend more on others. Slide toward $ for basic or $$$ for nicer.</p>
+      <Card className="mt-6 p-5">
+        <SpendLevels state={preview} head={head} value={spend} onChange={onChange} />
+      </Card>
+      <div className={cx('mt-4 flex flex-wrap items-baseline justify-between gap-2 rounded-2xl border px-4 py-3', left >= 0 ? 'border-line bg-paper' : 'border-danger/40 bg-danger-soft')} role="status">
+        <span className="font-semibold text-ink">Estimated total for {plural(head.total, 'guest')}: {money(total, false)}</span>
+        <span className={cx('text-[14px] font-semibold', left >= 0 ? 'text-ok' : 'text-danger')}>
+          {left >= 0 ? `${money(left, false)} left of your ${money(draft.budget, false)} budget` : `${money(-left, false)} over your ${money(draft.budget, false)} budget`}
+        </span>
+        {left < 0 && (
+          <Button size="sm" variant="secondary" className="w-full sm:w-auto" onClick={() => {
+            const r = fitToBudget(preview, head, spend, draft.budget);
+            onSet(r.spend);
+            toast(r.fits
+              ? { title: 'Levels lowered to fit your budget', detail: `Estimated total ${money(r.total, false)} of ${money(draft.budget, false)}.`, tone: 'success' }
+              : { title: 'Still over budget at the basic level', detail: `The lowest estimate is ${money(r.total, false)}. Try fewer guests, a bigger budget, or skip optional items later on the Budget page.`, tone: 'warn' });
+          }}>Fit My Budget</Button>
+        )}
+      </div>
+      <p className="mt-2 text-[13px] text-muted">You can change these anytime on the Budget page, or for a single item in Plan and Shop.</p>
+      {children}
+    </>
   );
 }
 

@@ -43,7 +43,11 @@ export interface EventInfo {
   preferences?: string; // anything else the host wants remembered
   foodText?: string; // food in the host's own words ("BBQ, pupusas, cupcakes"); drives the menu items
   drinksText?: string; // drinks in the host's own words ("lemonade, beer")
+  spend?: Partial<Record<Category, number>>; // how nice each kind of thing should be, from 1 ($ basic) through 2 ($$ standard) to 3 ($$$ nicer); in between mixes levels
 }
+
+/** Price level: 1 = $ basic, 2 = $$ standard, 3 = $$$ nicer. */
+export type Tier = 1 | 2 | 3;
 
 export type Alcohol = 'none' | 'beer-wine' | 'full-bar' | 'byob';
 export type SoftDrink = 'soda' | 'water' | 'juice' | 'coffee-tea';
@@ -115,6 +119,9 @@ export interface PlanItem {
   tag?: 'outdoor' | 'kids' | 'menu' | 'vendor';
   removedReason?: 'not-needed' | 'venue' | 'vendor'; // why it is off the list (none = just removed)
   coveredBy?: string; // vendor that handles it, when removedReason is 'vendor'
+  tier?: Tier; // price level the suggested products are at (none = standard)
+  tierPinned?: boolean; // the host set this item's level, so the category's level doesn't change it
+  stdOptions?: RetailerOption[]; // the standard-level products, kept to switch levels
 }
 
 export type TaskStatus = 'todo' | 'in-progress' | 'blocked' | 'done';

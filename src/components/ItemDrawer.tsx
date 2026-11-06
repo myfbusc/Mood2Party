@@ -2,11 +2,12 @@ import { useMemo, useState } from 'react';
 import { Check, ChevronDown, House, Info, ShoppingCart, Plus, Trash2 } from 'lucide-react';
 import { useStore } from '../lib/store';
 import { CATEGORIES, CATEGORY_LABEL, CHANNEL_LABEL, RETAILERS, storeName } from '../lib/catalog';
-import { computeLine, round2 } from '../lib/plan';
+import { computeLine, optionFor, round2 } from '../lib/plan';
 import { costChange, money, plural } from '../lib/format';
 import { markPurchased, patchItem, setItemQuantity } from '../lib/actions';
-import { Button, Drawer, Field, OptionalToggle, PaidInput, cx, inputCls } from './ui';
-import type { Category, Channel, PlanItem, RetailerId, RetailerOption } from '../lib/types';
+import { applySpend, costFnFor, hasLevels, itemAtTier, levelText, TIER_LABEL, TIER_SIGN, TIERS } from '../lib/tiers';
+import { Button, Drawer, Field, OptionalToggle, PaidInput, Segmented, cx, inputCls } from './ui';
+import type { Category, Channel, PlanItem, RetailerId, RetailerOption, Tier } from '../lib/types';
 
 type Status = 'need' | 'bought' | 'have';
 const STATUS: { key: Status; label: string; icon: typeof Check }[] = [
@@ -35,6 +36,7 @@ export default function ItemDrawer({ id }: { id: string }) {
     notes: item?.notes ?? '',
     status: initialStatus,
     paid: item?.paidAmount as number | undefined,
+    level: (item?.tierPinned && item.tier ? String(item.tier) : 'follow') as 'follow' | '1' | '2' | '3',
     // Price per pack for each store, editable
     prices: Object.fromEntries((item?.options ?? []).map((o) => [o.retailer, { packQty: String(o.packQty), packPrice: String(o.packPrice), supplier: o.supplier ?? '', channel: o.channel ?? 'in-store' }])) as Record<string, { packQty: string; packPrice: string; supplier: string; channel: Channel }>,
   }));
@@ -46,9 +48,28 @@ export default function ItemDrawer({ id }: { id: string }) {
 
   if (!item || !line) return null;
 
+  // Price level: the item's own, or its category's from Budget
+  const levels = hasLevels(item) && item.purchasedPkgs === 0;
+  const catLevel = s.event.spend?.[f.category] ?? 2;
+  // Following the category: where the category's level (or mix) places this item
+  const followed = () => applySpend(s.items.map((x) => (x.id === item.id ? { ...x, category: f.category, tierPinned: undefined } : x)), s.event, costFnFor(s.event, s.appliedFactors, head)).find((x) => x.id === item.id) ?? item;
+  const levelled = !levels ? item : f.level === 'follow' ? { ...followed(), category: item.category } : itemAtTier(item, Number(f.level) as Tier, true);
+  const pickLevel = (v: typeof f.level) => {
+    const next = !levels ? item : v === 'follow' ? followed() : itemAtTier(item, Number(v) as Tier, true);
+    setF((p) => ({
+      ...p,
+      level: v,
+      retailer: p.retailer === 'own' || next.options.some((o) => o.retailer === p.retailer) ? p.retailer : next.retailer,
+      prices: {
+        ...Object.fromEntries(next.options.filter((o) => o.retailer !== 'own').map((o) => [o.retailer, { packQty: String(o.packQty), packPrice: String(o.packPrice), supplier: '', channel: 'in-store' as Channel }])),
+        ...(p.prices.own ? { own: p.prices.own } : {}),
+      },
+    }));
+  };
+
   const qty = Math.round(num(f.qty));
   const options: RetailerOption[] = Object.entries(f.prices).map(([r, v]) => {
-    const base = item.options.find((o) => o.retailer === r);
+    const base = levelled.options.find((o) => o.retailer === r);
     const packQty = Math.max(1, Math.round(num(v.packQty, 1)));
     return {
       retailer: r as RetailerId,
@@ -76,7 +97,7 @@ export default function ItemDrawer({ id }: { id: string }) {
   const preview = computeLine({ ...draft, purchasedPkgs: boughtPkgs, paidAmount: f.status === 'bought' ? f.paid : undefined }, head, s.event, s.appliedFactors);
   const opt = preview.opt;
   const diff = round2(preview.cost - line.cost);
-  const priceChanged = item.options.some((o) => { const n = options.find((x) => x.retailer === o.retailer); return n && (n.packPrice !== o.packPrice || n.packQty !== o.packQty); });
+  const priceChanged = levelled.options.some((o) => { const n = options.find((x) => x.retailer === o.retailer); return n && (n.packPrice !== o.packPrice || n.packQty !== o.packQty); });
 
   const save = () => {
     update((p) => {
@@ -88,6 +109,7 @@ export default function ItemDrawer({ id }: { id: string }) {
         removedReason: item.removedReason,
         coveredBy: draft.removed ? item.coveredBy : undefined,
         ...(priceChanged ? { priceNote: 'Your price.' } : {}),
+        ...(levels ? { tier: levelled.tier, tierPinned: levelled.tierPinned, stdOptions: levelled.stdOptions } : {}),
       });
       if (f.status === 'bought') {
         if (item.purchasedPkgs === 0) n = markPurchased(n, id, true);
@@ -196,13 +218,29 @@ export default function ItemDrawer({ id }: { id: string }) {
 
         {/* Where and how much */}
         <div className="grid grid-cols-2 gap-3 border-t border-line pt-4">
+          {levels && (
+            <div className="col-span-2">
+              <p className="mb-1.5 text-sm font-semibold">Price level</p>
+              <Segmented
+                label="Price level"
+                size="sm"
+                value={f.level}
+                onChange={pickLevel}
+                options={[
+                  { value: 'follow', label: `Like ${CATEGORY_LABEL[f.category].toLowerCase()} (${levelText(catLevel)})` },
+                  ...TIERS.map((t) => ({ value: String(t) as '1' | '2' | '3', label: <span title={TIER_LABEL[t]}>{TIER_SIGN[t]}<span className="sr-only"> {TIER_LABEL[t]}</span></span> })),
+                ]}
+              />
+              <p className="mt-1.5 text-[13px] text-muted">{optionFor(levelled, f.retailer === 'own' ? undefined : f.retailer).product}</p>
+            </div>
+          )}
           <Field label="Where to buy" htmlFor="it-store" className="col-span-2">
             <select id="it-store" className={inputCls} value={f.retailer} onChange={(e) => {
               const r = e.target.value as RetailerId;
               if (r === 'own' && !f.prices.own) setPrice('own', 'packPrice', '');
               set('retailer', r);
             }}>
-              {item.options.filter((o) => o.retailer !== 'own').map((o) => <option key={o.retailer} value={o.retailer}>{RETAILERS[o.retailer].name}</option>)}
+              {levelled.options.filter((o) => o.retailer !== 'own').map((o) => <option key={o.retailer} value={o.retailer}>{RETAILERS[o.retailer].name}</option>)}
               <option value="own">{hasOwn ? priceRow('own').supplier || 'My own store' : 'My own store or supplier…'}</option>
             </select>
           </Field>
@@ -228,7 +266,7 @@ export default function ItemDrawer({ id }: { id: string }) {
         <Field label="Notes" htmlFor="it-notes"><textarea id="it-notes" rows={2} className={cx(inputCls, 'py-2')} value={f.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Brand, size, color, where to pick it up…" /></Field>
 
         {/* Compare stores for this item */}
-        {item.options.filter((o) => o.retailer !== 'own').length > 1 && f.status !== 'have' && (
+        {levelled.options.filter((o) => o.retailer !== 'own').length > 1 && f.status !== 'have' && (
           <section className="rounded-2xl border border-line">
             <button type="button" onClick={() => setCompareOpen((v) => !v)} aria-expanded={compareOpen} className="flex min-h-11 w-full items-center justify-between gap-2 px-3 text-sm font-semibold text-forest">
               Compare Stores for This Item <ChevronDown className={cx('size-4 transition-transform', compareOpen && 'rotate-180')} />

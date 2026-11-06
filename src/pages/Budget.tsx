@@ -7,7 +7,10 @@ import { lowestCostSaving } from '../lib/actions';
 import { money, plural } from '../lib/format';
 import { uid } from '../lib/tasks';
 import { Button, Card, PageHeader, NumberInput, PaidInput, InfoTip, Progress, SectionHead, Stat, cx, inputBase } from '../components/ui';
-import { patchItem } from '../lib/actions';
+import { patchItem, setSpend } from '../lib/actions';
+import { SpendLevels, useSpendCosts } from '../components/SpendLevels';
+import { levelName, levelText, SPEND_CATEGORIES, TIER_LABEL, TIER_SIGN } from '../lib/tiers';
+import type { Category, Tier } from '../lib/types';
 import type { OtherExpense } from '../lib/types';
 
 /** Common extra costs, one tap to add. A minimum spend is handled differently (see plan.ts). */
@@ -39,6 +42,28 @@ export default function Budget() {
   const optional = plan.active.filter((l) => l.item.priority === 'optional' && l.cost > 0 && l.item.purchasedPkgs === 0);
   const optionalSaving = round2(optional.reduce((a, l) => a + l.cost, 0));
   const atSuggested = computePlan(s, att.expected).grandTotal;
+  const spend = s.event.spend ?? {};
+  const { costs: tierCosts } = useSpendCosts(s, head, spend);
+  // The kind of thing where dropping to the next level down saves the most
+  const tierStep = SPEND_CATEGORIES
+    .map((c) => {
+      const from = spend[c] ?? 2;
+      if (from <= 1) return null;
+      const to = Math.max(1, Math.ceil(from) - 1) as Tier;
+      return { c, from, to, save: round2(plan.byCategory[c] - tierCosts[c][to]) };
+    })
+    .filter((x): x is { c: Category; from: number; to: Tier; save: number } => !!x && x.save >= 5)
+    .sort((a, b) => b.save - a.save)[0];
+  const changeSpend = (c: Category, level: number, quiet = false) => {
+    const before = spend[c] ?? 2;
+    if (Math.abs(before - level) < 0.004) return;
+    const beforeCost = plan.byCategory[c];
+    const next = setSpend(s, c, level);
+    const afterCost = computePlan(next, head).byCategory[c];
+    update((p) => setSpend(p, c, level));
+    const diff = round2(afterCost - beforeCost);
+    if (!quiet) toast({ title: `${CATEGORY_LABEL[c]}: ${levelText(level)} ${levelName(level).replace(/^Mix/, 'mix')}`, detail: Math.abs(diff) >= 1 ? `${diff > 0 ? 'Adds' : 'Saves'} about ${money(Math.abs(diff), false)}. Items you bought or set yourself keep their price.` : 'Prices updated.', tone: 'success' });
+  };
   const basisSaving = s.basis === 'custom' && head.total > att.expected.total ? round2(plan.grandTotal - atSuggested) : 0;
 
   const rows: { label: string; value: number }[] = [
@@ -149,9 +174,15 @@ export default function Budget() {
           </Card>
         </section>
 
+        <section aria-labelledby="levels" className="mt-8 min-w-0">
+          <SectionHead id="levels" title={<span className="inline-flex items-center gap-1">Spending Levels<InfoTip label="About spending levels">Slide toward $ to save on a kind of thing, or toward $$$ for nicer products. Items you already bought, and items you set a level for yourself, keep their price.</InfoTip></span>} />
+          <Card className="p-4 sm:p-5">
+            <SpendLevels state={s} head={head} value={spend} onChange={(c, t) => changeSpend(c, t)} compact />
+          </Card>
+        </section>
       </div>
 
-      {(optimizeSaving > 0 || optional.length > 0 || basisSaving > 0 || lastSave) && <section className="mt-8" aria-labelledby="save">
+      {(optimizeSaving > 0 || optional.length > 0 || basisSaving > 0 || tierStep || lastSave) && <section className="mt-8" aria-labelledby="save">
         <SectionHead id="save" title={plan.remaining < 0 ? 'Ways to Get Back Within Budget' : 'Ways to Save'} />
         {lastSave && (
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-line bg-paper px-4 py-2.5">
@@ -165,6 +196,18 @@ export default function Budget() {
             <p className="mt-2 font-bold">Switch Stores</p>
             <p className="mt-1 flex-1 text-sm text-muted">{`A cheaper mix of stores saves about ${money(optimizeSaving)}.`}</p>
             <Button size="sm" variant="secondary" className="mt-3 self-start" onClick={() => go('plan')} disabled={optimizeSaving <= 0}>Open Plan and Shop</Button>
+          </Card>}
+          {tierStep && <Card className="flex flex-col p-4">
+            <Lightbulb className="size-5 text-gold" />
+            <p className="mt-2 font-bold">Go {TIER_LABEL[tierStep.to]} on {CATEGORY_LABEL[tierStep.c]}</p>
+            <p className="mt-1 flex-1 text-sm text-muted">{`Moving ${CATEGORY_LABEL[tierStep.c].toLowerCase()} from ${levelText(tierStep.from)} to ${TIER_SIGN[tierStep.to]} saves about ${money(tierStep.save, false)}.`}</p>
+            <Button size="sm" variant="secondary" className="mt-3 self-start" onClick={() => {
+              const { c, from, to, save } = tierStep;
+              changeSpend(c, to, true);
+              const undo = () => { update((p) => setSpend(p, c, from)); setLastSave(null); toast({ title: `${CATEGORY_LABEL[c]} back to ${levelText(from)}`, tone: 'info' }); };
+              setLastSave({ label: `${CATEGORY_LABEL[c]} set to ${TIER_SIGN[to]} ${TIER_LABEL[to]} (saves ${money(save, false)})`, undo });
+              toast({ title: `${CATEGORY_LABEL[c]}: ${TIER_SIGN[to]} ${TIER_LABEL[to]}`, detail: `Saves about ${money(save, false)}.`, tone: 'success', action: { label: 'Undo', run: undo } });
+            }}>Switch to {TIER_SIGN[tierStep.to]}</Button>
           </Card>}
           {optional.length > 0 && <Card className="flex flex-col p-4">
             <Lightbulb className="size-5 text-gold" />

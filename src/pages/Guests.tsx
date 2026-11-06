@@ -245,10 +245,22 @@ function PlanFor({ head, markDid }: { head: Headcount; markDid: (a: 'basis') => 
   });
 
   const cost = computePlan(s, head).grandTotal;
-  // A small track that shows where the planning number sits between minimum and maximum
-  const lo = Math.min(range.min, head.total);
-  const hi = Math.max(range.max, head.total, lo + 1);
-  const pos = (n: number) => `${Math.min(100, Math.max(0, ((n - lo) / (hi - lo)) * 100))}%`;
+  // A slider for the planning number, with the minimum-to-maximum band behind it.
+  // Its ends stay put while dragging; letting go on Min, Expected or Max picks that option.
+  const [drag, setDrag] = useState<{ n: number; lo: number; hi: number } | null>(null);
+  const pad = Math.max(2, Math.round((range.max - range.min) * 0.25));
+  const bounds = drag ?? { lo: Math.max(0, Math.min(range.min, head.total) - pad), hi: Math.max(range.max, head.total) + pad };
+  const shown = drag?.n ?? head.total;
+  // Positions line up with the slider's thumb (20px wide), not the raw track
+  const at = (n: number) => { const f = Math.min(1, Math.max(0, (n - bounds.lo) / Math.max(1, bounds.hi - bounds.lo))); return `calc(${f * 100}% + ${10 - f * 20}px)`; };
+  const commitDrag = (n: number) => {
+    setDrag(null);
+    if (n === head.total) return;
+    markDid('basis');
+    const tick = n === range.min ? 'min' : n === att.expected.total ? 'expected' : n === range.max ? 'max' : null;
+    if (tick) choose(tick);
+    else update((p) => ({ ...p, basis: 'custom', customCount: n }));
+  };
   const ticks = [
     { b: 'min' as const, label: 'Min', n: range.min },
     { b: 'expected' as const, label: 'Expected', n: att.expected.total },
@@ -282,7 +294,7 @@ function PlanFor({ head, markDid }: { head: Headcount; markDid: (a: 'basis') => 
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <label htmlFor="plan-count" className="sr-only">Plan for how many people</label>
-          <NumberInput id="plan-count" className={cx(inputBase, 'h-12 w-24 rounded-2xl border-2 border-forest/40 text-center font-display text-2xl font-bold text-ink focus:border-forest')} value={head.total} onValue={setNumber} />
+          <NumberInput id="plan-count" className={cx(inputBase, 'h-12 w-24 rounded-2xl border-2 border-forest/40 text-center font-display text-2xl font-bold text-ink focus:border-forest')} value={shown} onValue={setNumber} />
           <label htmlFor="plan-basis" className="sr-only">Which number to plan for</label>
           <select id="plan-basis" className={cx(inputBase, 'h-12 w-auto min-w-44 rounded-2xl font-semibold')} value={s.basis} onChange={(e) => choose(e.target.value as PlanningBasis)}>
             {OPTIONS.map((o) => <option key={o.b} value={o.b}>{o.label}{o.n !== undefined ? ` (${o.n})` : ''}</option>)}
@@ -297,20 +309,37 @@ function PlanFor({ head, markDid }: { head: Headcount; markDid: (a: 'basis') => 
       </div>
 
       {range.max > range.min && (
-        <div className="mt-4 pl-0 sm:pl-14" aria-hidden="true">
-          <div className="relative h-2 rounded-full bg-chip">
-            <div className="absolute inset-y-0 rounded-full bg-sage/70" style={{ left: pos(range.min), right: `calc(100% - ${pos(range.max)})` }} />
-            <span className="m2p-grad absolute top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full ring-4 ring-paper" style={{ left: pos(head.total) }} />
+        <div className="mt-4 pl-0 sm:pl-14">
+          <div className="relative flex h-7 items-center">
+            <div className="absolute inset-x-0 h-2 rounded-full bg-chip" aria-hidden="true" />
+            <div className="absolute h-2 rounded-full bg-sage/70" style={{ left: at(range.min), right: `calc(100% - ${at(range.max)})` }} aria-hidden="true" />
+            <input
+              type="range"
+              aria-label="Plan for how many people"
+              aria-valuetext={`${shown} people`}
+              min={bounds.lo}
+              max={bounds.hi}
+              step={1}
+              value={shown}
+              onChange={(e) => setDrag({ n: Number(e.target.value), lo: bounds.lo, hi: bounds.hi })}
+              onPointerUp={(e) => commitDrag(Number((e.target as HTMLInputElement).value))}
+              onKeyUp={(e) => commitDrag(Number((e.target as HTMLInputElement).value))}
+              onBlur={() => { if (drag) commitDrag(drag.n); }}
+              className="m2p-range-plain relative w-full cursor-pointer touch-pan-y"
+            />
           </div>
-          <div className="relative mt-1.5 h-4 text-[12px]">
+          <div className="relative mt-1 h-4 text-[12px]" aria-hidden="true">
             {ticks.map((t, i) => (
-              <span
+              <button
+                type="button"
+                tabIndex={-1}
                 key={t.b}
-                className={cx('tnum absolute whitespace-nowrap', i === 0 ? 'left-0' : i === 2 ? 'right-0' : '-translate-x-1/2', s.basis === t.b ? 'font-bold text-forest' : 'text-muted')}
-                style={i === 1 ? { left: pos(t.n) } : undefined}
+                onClick={() => choose(t.b)}
+                className={cx('tnum absolute whitespace-nowrap hover:text-ink', i === 1 && '-translate-x-1/2', s.basis === t.b ? 'font-bold text-forest' : 'text-muted')}
+                style={i === 0 ? { left: `max(0px, calc(${at(t.n)} - 10px))` } : i === 2 ? { right: `max(0px, calc(100% - ${at(t.n)} - 10px))` } : { left: at(t.n) }}
               >
                 {t.label} {t.n}
-              </span>
+              </button>
             ))}
           </div>
         </div>

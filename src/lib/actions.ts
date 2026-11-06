@@ -5,9 +5,11 @@ import { stateAttendance, stateHeadcount } from './attendance';
 import { computeImpact, computeLine, computePlan, computeStrategies, round2, type PlanTotals } from './plan';
 import { addDays, applyEventChange, generateTasks, uid } from './tasks';
 import type { Draft } from './parse';
+import { applySpend, costFnFor, itemAtTier } from './tiers';
+import type { Category, Tier } from './types';
 import type { AppState, EventInfo, GuestGroup, Headcount, Learnings, Outcome, PlanItem, RetailerId } from './types';
 
-export function planFromDraft(prev: AppState, d: Draft): AppState {
+export function planFromDraft(prev: AppState, d: Draft, spend?: Partial<Record<Category, number>>): AppState {
   const event: EventInfo = {
     name: d.name || d.type,
     type: d.type,
@@ -29,6 +31,7 @@ export function planFromDraft(prev: AppState, d: Draft): AppState {
     preferences: (d.preferences ?? '').trim(),
     foodText: (d.foodText ?? '').trim(),
     drinksText: (d.drinksText ?? '').trim(),
+    ...(spend && Object.keys(spend).length ? { spend } : {}),
   };
   const ev = withParsedMenu(event);
   const kids = Math.max(0, Math.min(d.guestExpected, Math.round(d.children ?? (d.guestExpected * d.childPct) / 100)));
@@ -62,7 +65,8 @@ export function planFromDraft(prev: AppState, d: Draft): AppState {
     baseline: null,
   };
   const menu = syncCustomMenu(next, ev);
-  return withBaseline({ ...next, items: menu.items, tasks: menu.tasks });
+  const withMenu = { ...next, items: menu.items, tasks: menu.tasks };
+  return withBaseline({ ...withMenu, items: spendItems(withMenu) });
 }
 
 /** A fresh copy of an event to reuse as a template: same items, tasks, helpers and guest list, with nothing bought, done or answered yet. */
@@ -172,7 +176,8 @@ export function saveEventDetails(s: AppState, nextRaw: EventInfo): EventSaveResu
     tasks = r.tasks;
     itemNotes.push(...r.notes);
   }
-  const state = { ...s, event: next, items, tasks };
+  const draftState = { ...s, event: next, items, tasks };
+  const state = { ...draftState, items: spendItems(draftState) };
   return { state, changed, flagged, shiftedDays, itemNotes };
 }
 
@@ -180,7 +185,7 @@ export function ensureKidsItems(s: AppState): AppState {
   const att = stateAttendance(s);
   if (att.max.children > 0 && !s.items.some((x) => x.id === 'juice')) {
     const t = juiceTemplate(s.event);
-    if (t) return { ...s, items: [...s.items, templateToItem(t)] };
+    if (t) { const n = { ...s, items: [...s.items, templateToItem(t)] }; return { ...n, items: spendItems(n) }; }
   }
   return s;
 }
@@ -333,4 +338,29 @@ export function applyRsvpReply(s: AppState, replyId: string, r: RsvpReplyIn): { 
   }
   const group: GuestGroup = { id: `rsvp-${replyId}`, ...fields, adults: Math.max(1, fields.adults) };
   return { state: ensureKidsItems({ ...s, guests: [...s.guests, group] }), change: 'new', name };
+}
+
+/** Sets how nice one kind of thing should be ($ basic, $$ standard, $$$ nicer). Items the host set by hand and bought items keep theirs. */
+export function setSpend(s: AppState, category: Category, level: number): AppState {
+  const event = { ...s.event, spend: { ...(s.event.spend ?? {}), [category]: Math.round(Math.min(3, Math.max(1, level)) * 100) / 100 } };
+  const n = { ...s, event };
+  return { ...n, items: spendItems(n) };
+}
+
+/** The items with the event's spending levels applied, for the plan's current guest count. */
+export function spendItems(s: AppState): PlanItem[] {
+  return applySpend(s.items, s.event, costFnFor(s.event, s.appliedFactors, stateHeadcount(s)));
+}
+
+/** Sets one item's level; "follow" puts it back on its category's level. */
+export function setItemTier(s: AppState, id: string, tier: Tier | 'follow'): AppState {
+  const n: AppState = {
+    ...s,
+    items: s.items.map((it) => {
+      if (it.id !== id) return it;
+      if (tier === 'follow') return { ...it, tierPinned: undefined };
+      return itemAtTier(it, tier, true);
+    }),
+  };
+  return { ...n, items: spendItems(n) };
 }
